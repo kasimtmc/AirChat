@@ -1,6 +1,6 @@
 # AirChat — Requirements
 
-Status: **v0.2** (2026-10-14): everything here is implemented on Android unless marked otherwise.
+Status: **v0.2** (2026-10-15): everything here is implemented on Android unless marked otherwise.
 This document records product decisions; change it when a decision changes.
 
 ## 1. Vision
