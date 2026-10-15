@@ -1,6 +1,6 @@
 # AirChat — Threat model
 
-Status: **draft v0.2** (2026-10-14), written to prepare an independent audit (requirement S-11).
+Status: **draft v0.2** (2026-10-15), written to prepare an independent audit (requirement S-11).
 It says what AirChat protects, from whom, on what it relies, and where it knowingly falls short.
 Details are in [protocol.md](../rust/airchat-protocol/docs/protocol.md) (`§`), [requirements.md](requirements.md) (`S-2`, `AP-4`, …)
 and [architecture.md](architecture.md) (`arch §`). Where this document and those disagree, they win
