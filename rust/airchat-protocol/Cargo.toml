@@ -1,0 +1,42 @@
+[package]
+name = "airchat-protocol"
+description = "The AirChat protocol: end-to-end encrypted messaging, calls and groups between nearby devices without the internet. Specification, test vectors and reference implementation."
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/kasimtmc/airchat-protocol"
+readme = "README.md"
+keywords = ["protocol", "mesh", "e2ee", "post-quantum", "offline"]
+categories = ["cryptography", "network-programming"]
+# Not on crates.io until the specification reaches 1.0; use it as a git dependency.
+publish = false
+
+[features]
+# The fuzz targets in `airchat_protocol::fuzz`, for `fuzz/` and for other crates' fuzzers.
+fuzzing = []
+# Test helpers (vectors, the in-process fuzz harness) for crates that build on this one.
+test-util = ["fuzzing"]
+
+[dependencies]
+# Cryptographic primitives. Only `airchat_protocol::crypto` may use these.
+libcrux-chacha20poly1305 = "0.0.10"
+libcrux-ed25519 = "0.0.10"
+libcrux-hkdf = "0.0.9"
+libcrux-hmac = "0.0.9"
+libcrux-kem = { version = "0.0.10", default-features = false }
+libcrux-ml-kem = "0.0.11"
+libcrux-sha2 = "0.0.9"
+libcrux-traits = "0.0.9"
+argon2 = { version = "0.6.0", default-features = false, features = ["alloc", "zeroize"] }
+getrandom = "0.4.3"
+zeroize = { version = "1.9.1", features = ["derive"] }
+# Constant-time comparison; already in the tree through argon2.
+subtle = { version = "2.6.1", default-features = false }
+# Certificate signatures of Android key attestation chains (ECDSA P-256/P-384, RSA PKCS#1 v1.5),
+# which libcrux does not cover; verification only (docs/protocol.md §6.10).
+ring = { version = "0.17.14", default-features = false, features = ["alloc"] }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+# Independent X-Wing implementation, used only to cross-check libcrux in tests.
+x-wing = { version = "0.1.1", features = ["hazmat"] }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The bubble for themed icons (Android 13+): one color, the devices and links cut out. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M37,32H71A7,7 0,0 1,78 39V63A7,7 0,0 1,71 70H52L40,80V70H37A7,7 0,0 1,30 63V39A7,7 0,0 1,37 32Z M49,41a5,5 0,1 0,10 0a5,5 0,1 0,-10 0Z M37,59a5,5 0,1 0,10 0a5,5 0,1 0,-10 0Z M61,59a5,5 0,1 0,10 0a5,5 0,1 0,-10 0Z M52.48,45.99L46.02,55.67L43.52,54.01L49.98,44.33Z M58.02,44.33L64.48,54.01L61.98,55.67L55.52,45.99Z M47,57.5H61V60.5H47Z" />
+</vector>

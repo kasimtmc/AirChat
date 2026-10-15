@@ -1,0 +1,21 @@
+[package]
+name = "airchat-core"
+description = "Platform-independent AirChat core: storage, contacts, groups and routing over airchat-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# The fuzz targets in `airchat_core::fuzz`, for `rust/fuzz` (requirement S-11).
+fuzzing = ["airchat-protocol/fuzzing"]
+
+[dependencies]
+airchat-protocol.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+airchat-protocol = { workspace = true, features = ["test-util"] }
+tempfile = "3"

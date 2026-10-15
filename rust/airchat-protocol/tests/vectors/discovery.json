@@ -1,0 +1,20 @@
+{
+  "presence_key": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+  "epoch": "490000",
+  "presence_token": "51248a452c4a495b",
+  "pairing_token": "1337beef",
+  "pairing_label": "🌍 4270",
+  "ble_service_uuid": "5decc7aa-bcb2-413d-97bc-4e02358f29a6",
+  "ble_psm": "133",
+  "ble_presence_beacon": "018551248a452c4a495b",
+  "ble_pairing_beacon": "02851337beef",
+  "ble_channel_beacon": "0385c1c2c3c451525354",
+  "aware_service_name": "airchat-v0",
+  "aware_presence_beacon": "0151248a452c4a495b",
+  "aware_pairing_beacon": "021337beef",
+  "aware_channel_beacon": "03c1c2c3c451525354",
+  "request_id": "AIR-7GY3R-F1W7G-Y3RF1-W7GY3-RF1WC",
+  "request_token": "99493d1a6da23f0d",
+  "ble_request_beacon": "048599493d1a6da23f0d",
+  "aware_request_beacon": "0499493d1a6da23f0d"
+}

@@ -1,0 +1,24 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/.idea/
+
+# Release builds and their symbols, made locally and signed; never committed.
+/app/release/
+# Where the release key is and how to open it (see app/build.gradle.kts).
+/keystore.properties
+
+# A local note on pushing the protocol subtree; never committed.
+/protocol_push.txt

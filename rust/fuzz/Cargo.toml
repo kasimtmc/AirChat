@@ -1,0 +1,143 @@
+# Coverage-guided fuzzing of the core's parsers (requirement S-11) with libFuzzer: `run.sh`, or
+# cargo-fuzz on nightly; see README.md. The targets themselves live in `airchat_core::fuzz`.
+[package]
+name = "airchat-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+airchat-core = { path = "../airchat-core", features = ["fuzzing"] }
+libfuzzer-sys = "0.4"
+
+# A workspace of its own: it builds with coverage instrumentation, the core's builds without.
+[workspace]
+
+[[bin]]
+name = "chat_message"
+path = "fuzz_targets/chat_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "envelope"
+path = "fuzz_targets/envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "have"
+path = "fuzz_targets/have.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "padding"
+path = "fuzz_targets/padding.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "roster"
+path = "fuzz_targets/roster.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "group_records"
+path = "fuzz_targets/group_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "text"
+path = "fuzz_targets/text.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "beacons"
+path = "fuzz_targets/beacons.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handshake_first"
+path = "fuzz_targets/handshake_first.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handshake_answer"
+path = "fuzz_targets/handshake_answer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handshake_last"
+path = "fuzz_targets/handshake_last.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "stored"
+path = "fuzz_targets/stored.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jitter"
+path = "fuzz_targets/jitter.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "first_frames"
+path = "fuzz_targets/first_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mesh_records"
+path = "fuzz_targets/mesh_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "channel_records"
+path = "fuzz_targets/channel_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "contact_records"
+path = "fuzz_targets/contact_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "attestation"
+path = "fuzz_targets/attestation.rs"
+test = false
+doc = false

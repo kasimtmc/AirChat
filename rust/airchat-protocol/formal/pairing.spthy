@@ -1,0 +1,445 @@
+theory AirChatPairing
+begin
+
+/*
+ * Pairing (docs/protocol.md §4.3) in its three modes: QR invites (§4.4), Nearby Pairing with
+ * emoji (§4.5) and adding by AirChat ID (§4.8), with the contact cards that end each (§4.6), in
+ * the symbolic (Dolev-Yao) model. The network is the adversary's; it may also learn any device's
+ * identity key and any invite secret (someone photographed the QR code), at any time, and it may
+ * pair as itself under any name.
+ *
+ * Abstractions, beyond those of link.spthy (ideal KEM, hashes, KDFs and AEAD; MixHash runs as one
+ * hash; payloads as constants):
+ * - Ed25519 is an ideal signature scheme (Tamarin's `signing`).
+ * - The QR code is an authentic and confidential channel from the device that shows it to the
+ *   device that scans it (fact QR), unless the adversary learns the invite secret.
+ * - The emoji (§4.5) are modelled as the whole hash, not 30 bits of it, and the two users as
+ *   comparing them faithfully: a user confirms only if the device they picked shows the same
+ *   (restrictions below). The commitment that makes 30 bits enough against a man in the middle is
+ *   a matter of probability, which a symbolic model does not see; it is kept in the messages.
+ * - An AirChat ID is a hash of the identity key, and public: the adversary may know any.
+ * - Request tokens, epochs, rate limits, the user's approval and the 10-minute lifetime of
+ *   invites are left out; an invite is used once.
+ * - Static keys and presence keys are what cards carry; the static key's own use is link.spthy's.
+ * - Records after Split are modelled as AEAD under the transport keys with fixed nonces.
+ */
+
+builtins: hashing, signing
+
+functions: kempk/1, kemenc/2, kemdec/2,
+           kdfck/2, kdfk/2, split1/1, split2/1, export/1,
+           aead/4, adec/4,
+           inviteid/1, invitepsk/1, airchatid/1, requestpsk/1, commit/1, sas/3
+
+equations: kemdec(kemenc(ss, kempk(sk)), sk) = ss,
+           adec(k, n, ad, aead(k, n, ad, p)) = p
+
+restriction equal:
+  "All x y #i. Eq(x, y) @ i ==> x = y"
+
+restriction not_equal:
+  "All x y #i. Neq(x, y) @ i ==> not (x = y)"
+
+restriction one_identity_each:
+  "All A #i #j. Device(A) @ i & Device(A) @ j ==> #i = #j"
+
+restriction invite_used_once:
+  "All R s #i #j. InviteUsed(R, s) @ i & InviteUsed(R, s) @ j ==> #i = #j"
+
+// A user confirms the emoji only if the device they picked shows the same (§4.5).
+restriction initiator_user_compares:
+  "All I R s #i. IConfirms(I, R, s) @ i ==> Ex #j. RShows(R, s) @ j & j < i"
+
+restriction responder_user_compares:
+  "All R I s #i. RConfirms(R, I, s) @ i ==> Ex #j. IShows(I, s) @ j & j < i"
+
+/* Devices: an identity key, a static key, a presence key. The adversary may register its own. */
+
+rule Device:
+    [ Fr(~ltk), Fr(~sk), Fr(~pres) ]
+  --[ Device($A), Identity($A, pk(~ltk)), StaticKey($A, kempk(~sk)), Presence($A, ~pres) ]->
+    [ !Ltk($A, ~ltk), !Static($A, ~sk), !Pres($A, ~pres), !Id($A, pk(~ltk)), Out(pk(~ltk)), Out(kempk(~sk)) ]
+
+rule Reveal_identity_key:
+    [ !Ltk(A, ltk) ]
+  --[ RevId(A) ]->
+    [ Out(ltk) ]
+
+// A device the adversary controls shows whatever emoji it likes.
+rule Adversary_device_shows:
+    [ In(s) ]
+  --[ Corrupt($X), RShows($X, s), IShows($X, s) ]->
+    [ ]
+
+/* QR invites (§4.4). R shows a code to the user of device I, who scans it. */
+
+rule Show_invite:
+    [ Fr(~s), !Id($R, idR) ]
+  --[ ShowInvite($R, ~s) ]->
+    [ !Invite($R, ~s), QR($I, $R, idR, ~s) ]
+
+rule Photograph_invite:
+    [ !Invite(R, s) ]
+  --[ LeakInvite(s) ]->
+    [ Out(s) ]
+
+rule Invite_I_1:
+  let h0  = h('AirChat v1 pairing-protocol')
+      m1  = <'21', 'invite', inviteid(s)>
+      epk = kempk(~e)
+      h1  = h(<h0, m1, epk>)
+      ck1 = kdfck(h0, invitepsk(s))
+  in
+    [ QR($I, $R, idR, s), Fr(~e) ]
+  --[ Ephemeral(~e) ]->
+    [ Out(<m1, epk>), Invite_I_1($I, $R, idR, ~e, h1, ck1) ]
+
+rule Invite_R_1:
+  let h0   = h('AirChat v1 pairing-protocol')
+      m1   = <'21', 'invite', inviteid(s)>
+      h1   = h(<h0, m1, epk>)
+      ck1  = kdfck(h0, invitepsk(s))
+      ct   = kemenc(~ss, epk)
+      h2   = h(<h1, '22', ct>)
+      ck2  = kdfck(ck1, ~ss)
+      k2   = kdfk(ck1, ~ss)
+      c2   = aead(k2, '0', h2, 'invite')
+      h3   = h(<h2, c2>)
+      kr   = split2(ck2)
+      idR  = pk(ltkR)
+      card = <'card', idR, kempk(skR), sign(<'contact-card', kempk(skR)>, ltkR), pres,
+              sign(<'pairing-proof', h3>, ltkR)>
+  in
+    [ !Invite($R, s), In(<m1, epk>), Fr(~ss), !Ltk($R, ltkR), !Static($R, skR), !Pres($R, pres) ]
+  --[ InviteUsed($R, s), Encap(~ss, epk), InviteCardTo($R, s), RRunning(idR, h3, export(ck2)) ]->
+    [ Out(<'22', ct, c2>), Out(aead(kr, '0', '0', card)), Invite_R_1($R, idR, h3, ck2) ]
+
+// I accepts R's card only if its identity key is the one in the QR code; then sends its own.
+rule Invite_I_2:
+  let ct    = kemenc(ss, kempk(~e))
+      h2    = h(<h1, '22', ct>)
+      ck2   = kdfck(ck1, ss)
+      k2    = kdfk(ck1, ss)
+      c2    = aead(k2, '0', h2, 'invite')
+      h3    = h(<h2, c2>)
+      ki    = split1(ck2)
+      kr    = split2(ck2)
+      psk   = export(ck2)
+      cardR = <'card', idR, skpkR, sigR, presR, proofR>
+      idI   = pk(ltkI)
+      card  = <'card', idI, kempk(skI), sign(<'contact-card', kempk(skI)>, ltkI), pres,
+               sign(<'pairing-proof', h3>, ltkI)>
+  in
+    [ Invite_I_1($I, $R, idR, ~e, h1, ck1), In(<'22', ct, c2>), In(aead(kr, '0', '0', cardR)),
+      !Ltk($I, ltkI), !Static($I, skI), !Pres($I, pres) ]
+  --[ Eq(verify(sigR, <'contact-card', skpkR>, idR), true),
+      Eq(verify(proofR, <'pairing-proof', h3>, idR), true), Neq(idR, idI),
+      CardTo($I, idR), InvitePaired($I, $R, idR, psk),
+      IRunning(idI, idR, h3, psk),
+      Paired($I, idI, idR, skpkR, presR, psk) ]->
+    [ Out(aead(ki, '0', '0', card)) ]
+
+rule Invite_R_2:
+  let ki    = split1(ck2)
+      psk   = export(ck2)
+      cardI = <'card', idI, skpkI, sigI, presI, proofI>
+  in
+    [ Invite_R_1($R, idR, h3, ck2), In(aead(ki, '0', '0', cardI)) ]
+  --[ Eq(verify(sigI, <'contact-card', skpkI>, idI), true),
+      Eq(verify(proofI, <'pairing-proof', h3>, idI), true), Neq(idI, idR),
+      Paired($R, idR, idI, skpkI, presI, psk) ]->
+    [ ]
+
+/* Nearby Pairing (§4.5). The user of I picks device R from the list; both users compare emoji. */
+
+rule Nearby_I_1:
+  let h0  = h('AirChat v1 pairing-protocol')
+      m1  = <'21', 'nearby'>
+      epk = kempk(~e)
+      h1  = h(<h0, m1, epk>)
+  in
+    [ Fr(~e) ]
+  --[ Ephemeral(~e) ]->
+    [ Out(<m1, epk>), Nearby_I_1($I, $R, ~e, h1, h0) ]
+
+rule Nearby_R_1:
+  let h0  = h('AirChat v1 pairing-protocol')
+      m1  = <'21', 'nearby'>
+      h1  = h(<h0, m1, epk>)
+      ct  = kemenc(~ss, epk)
+      h2  = h(<h1, '22', ct>)
+      ck2 = kdfck(h0, ~ss)
+      k2  = kdfk(h0, ~ss)
+      c2  = aead(k2, '0', h2, commit(~nr))
+      h3  = h(<h2, c2>)
+  in
+    [ In(<m1, epk>), Fr(~ss), Fr(~nr) ]
+  --[ Encap(~ss, epk) ]->
+    [ Out(<'22', ct, c2>), Nearby_R_1($R, h3, ck2, k2, ~nr) ]
+
+rule Nearby_I_2:
+  let ct  = kemenc(ss, kempk(~e))
+      h2  = h(<h1, '22', ct>)
+      ck2 = kdfck(h0, ss)
+      k2  = kdfk(h0, ss)
+      c2  = aead(k2, '0', h2, cm)
+      h3  = h(<h2, c2>)
+      h4  = h(<h3, '23'>)
+      c3  = aead(k2, '1', h4, ~ni)
+      h5  = h(<h4, c3>)
+  in
+    [ Nearby_I_1($I, $R, ~e, h1, h0), In(<'22', ct, c2>), Fr(~ni) ]
+  --[ ]->
+    [ Out(<'23', c3>), Nearby_I_2($I, $R, h5, ck2, k2, ~ni, cm) ]
+
+rule Nearby_R_2:
+  let h4 = h(<h3, '23'>)
+      c3 = aead(k2, '1', h4, ni)
+      h5 = h(<h4, c3>)
+      h6 = h(<h5, '24'>)
+      c4 = aead(k2, '2', h6, nr)
+      h7 = h(<h6, c4>)
+      s  = sas(h7, ni, nr)
+  in
+    [ Nearby_R_1($R, h3, ck2, k2, nr), In(<'23', c3>) ]
+  --[ RShows($R, s) ]->
+    [ Out(<'24', c4>), Nearby_R_2($R, h7, ck2, s) ]
+
+// I checks that nr opens the commitment, then shows the emoji.
+rule Nearby_I_3:
+  let h6 = h(<h5, '24'>)
+      c4 = aead(k2, '2', h6, nr)
+      h7 = h(<h6, c4>)
+      s  = sas(h7, ni, nr)
+  in
+    [ Nearby_I_2($I, $R, h5, ck2, k2, ni, cm), In(<'24', c4>) ]
+  --[ Eq(commit(nr), cm), IShows($I, s) ]->
+    [ Nearby_I_3($I, $R, h7, ck2, s) ]
+
+// Each side sends its card once its user confirmed the emoji with the device they picked.
+rule Nearby_I_send_card:
+  let ki   = split1(ck2)
+      idI  = pk(ltkI)
+      card = <'card', idI, kempk(skI), sign(<'contact-card', kempk(skI)>, ltkI), pres,
+              sign(<'pairing-proof', h7>, ltkI)>
+  in
+    [ Nearby_I_3($I, $R, h7, ck2, s), !Ltk($I, ltkI), !Static($I, skI), !Pres($I, pres) ]
+  --[ IConfirms($I, $R, s), NearbyCardTo($I, $R), IRunning(idI, $R, h7, export(ck2)) ]->
+    [ Out(aead(ki, '0', '0', card)), Nearby_I_4($I, $R, idI, h7, ck2) ]
+
+rule Nearby_R_send_card:
+  let kr   = split2(ck2)
+      idR  = pk(ltkR)
+      card = <'card', idR, kempk(skR), sign(<'contact-card', kempk(skR)>, ltkR), pres,
+              sign(<'pairing-proof', h7>, ltkR)>
+  in
+    [ Nearby_R_2($R, h7, ck2, s), !Ltk($R, ltkR), !Static($R, skR), !Pres($R, pres) ]
+  --[ RConfirms($R, $I, s), NearbyCardTo($R, $I), RRunning(idR, h7, export(ck2)) ]->
+    [ Out(aead(kr, '0', '0', card)), Nearby_R_3($R, $I, idR, h7, ck2) ]
+
+rule Nearby_I_take_card:
+  let kr    = split2(ck2)
+      cardR = <'card', idR, skpkR, sigR, presR, proofR>
+  in
+    [ Nearby_I_4($I, $R, idI, h7, ck2), In(aead(kr, '0', '0', cardR)) ]
+  --[ Eq(verify(sigR, <'contact-card', skpkR>, idR), true),
+      Eq(verify(proofR, <'pairing-proof', h7>, idR), true), Neq(idR, idI),
+      PairedNearby($I, $R, idI, idR, skpkR, presR, export(ck2)) ]->
+    [ ]
+
+rule Nearby_R_take_card:
+  let ki    = split1(ck2)
+      cardI = <'card', idI, skpkI, sigI, presI, proofI>
+  in
+    [ Nearby_R_3($R, $I, idR, h7, ck2), In(aead(ki, '0', '0', cardI)) ]
+  --[ Eq(verify(sigI, <'contact-card', skpkI>, idI), true),
+      Eq(verify(proofI, <'pairing-proof', h7>, idI), true), Neq(idI, idR),
+      PairedNearby($R, $I, idR, idI, skpkI, presI, export(ck2)) ]->
+    [ ]
+
+/* Adding by AirChat ID (§4.8). Q typed the ID of O; O answers as the initiator. */
+
+rule Type_id:
+    [ !Id($O, idO) ]
+  --[ ]->
+    [ !Typed($Q, airchatid(idO)) ]
+
+rule Request_O_1:
+  let h0  = h('AirChat v1 pairing-protocol')
+      id  = airchatid(pk(ltkO))
+      m1  = <'21', 'request', id>
+      epk = kempk(~e)
+      h1  = h(<h0, m1, epk>)
+      ck1 = kdfck(h0, requestpsk(id))
+  in
+    [ !Ltk($O, ltkO), Fr(~e) ]
+  --[ Ephemeral(~e) ]->
+    [ Out(<m1, epk>), Request_O_1($O, ltkO, ~e, h1, ck1) ]
+
+rule Request_Q_1:
+  let h0  = h('AirChat v1 pairing-protocol')
+      m1  = <'21', 'request', id>
+      h1  = h(<h0, m1, epk>)
+      ck1 = kdfck(h0, requestpsk(id))
+      ct  = kemenc(~ss, epk)
+      h2  = h(<h1, '22', ct>)
+      ck2 = kdfck(ck1, ~ss)
+      k2  = kdfk(ck1, ~ss)
+      c2  = aead(k2, '0', h2, 'empty')
+      h3  = h(<h2, c2>)
+  in
+    [ !Typed($Q, id), In(<m1, epk>), Fr(~ss) ]
+  --[ Encap(~ss, epk) ]->
+    [ Out(<'22', ct, c2>), Request_Q_1($Q, id, h3, ck2) ]
+
+// O proves it holds the identity key of the ID.
+rule Request_O_2:
+  let ct  = kemenc(ss, kempk(~e))
+      h2  = h(<h1, '22', ct>)
+      ck2 = kdfck(ck1, ss)
+      k2  = kdfk(ck1, ss)
+      c2  = aead(k2, '0', h2, 'empty')
+      h3  = h(<h2, c2>)
+      ki  = split1(ck2)
+      idO = pk(ltkO)
+  in
+    [ Request_O_1($O, ltkO, ~e, h1, ck1), In(<'22', ct, c2>) ]
+  --[ ]->
+    [ Out(aead(ki, '0', '0', <'identity', idO, sign(<'pairing-proof', h3>, ltkO)>)),
+      Request_O_2($O, ltkO, h3, ck2) ]
+
+// Q checks the proof against the ID it typed, and only then sends its card.
+rule Request_Q_2:
+  let ki   = split1(ck2)
+      kr   = split2(ck2)
+      idQ  = pk(ltkQ)
+      card = <'card', idQ, kempk(skQ), sign(<'contact-card', kempk(skQ)>, ltkQ), pres,
+              sign(<'pairing-proof', h3>, ltkQ)>
+  in
+    [ Request_Q_1($Q, id, h3, ck2), In(aead(ki, '0', '0', <'identity', idO, proofO>)),
+      !Ltk($Q, ltkQ), !Static($Q, skQ), !Pres($Q, pres) ]
+  --[ Eq(airchatid(idO), id), Eq(verify(proofO, <'pairing-proof', h3>, idO), true), Neq(idO, idQ),
+      CardTo($Q, idO), RRunning(idQ, h3, export(ck2)) ]->
+    [ Out(aead(kr, '0', '0', card)), Request_Q_2($Q, idQ, idO, h3, ck2) ]
+
+// O's user approves the requester; O sends its card.
+rule Request_O_3:
+  let ki    = split1(ck2)
+      kr    = split2(ck2)
+      psk   = export(ck2)
+      idO   = pk(ltkO)
+      cardQ = <'card', idQ, skpkQ, sigQ, presQ, proofQ>
+      card  = <'card', idO, kempk(skO), sign(<'contact-card', kempk(skO)>, ltkO), pres,
+               sign(<'pairing-proof', h3>, ltkO)>
+  in
+    [ Request_O_2($O, ltkO, h3, ck2), In(aead(kr, '0', '0', cardQ)), !Static($O, skO), !Pres($O, pres) ]
+  --[ Eq(verify(sigQ, <'contact-card', skpkQ>, idQ), true),
+      Eq(verify(proofQ, <'pairing-proof', h3>, idQ), true), Neq(idQ, idO),
+      CardTo($O, idQ), IRunning(idO, idQ, h3, psk),
+      Paired($O, idO, idQ, skpkQ, presQ, psk) ]->
+    [ Out(aead(ki, '1', '0', card)) ]
+
+// Q takes O's card if its identity key is the one proven.
+rule Request_Q_3:
+  let ki    = split1(ck2)
+      psk   = export(ck2)
+      cardO = <'card', idO, skpkO, sigO, presO, proofO>
+  in
+    [ Request_Q_2($Q, idQ, idO, h3, ck2), In(aead(ki, '1', '0', cardO)) ]
+  --[ Eq(verify(sigO, <'contact-card', skpkO>, idO), true),
+      Eq(verify(proofO, <'pairing-proof', h3>, idO), true),
+      Paired($Q, idQ, idO, skpkO, presO, psk) ]->
+    [ ]
+
+/* Helpers, proved first and then used. */
+
+lemma ephemeral_keys_secret [reuse]:
+  "All e #i #k. Ephemeral(e) @ i & K(e) @ k ==> F"
+
+lemma encapsulated_secrets [reuse]:
+  "All ss pk #i #k. Encap(ss, pk) @ i & K(ss) @ k ==>
+     not (Ex e #j. Ephemeral(e) @ j & pk = kempk(e))"
+
+/* Sanity: each mode can complete with no key revealed. */
+
+lemma executable_invite:
+  exists-trace
+  "Ex I R idI idR skI skR pI pR psk #i #j.
+     Paired(I, idI, idR, skR, pR, psk) @ i & Paired(R, idR, idI, skI, pI, psk) @ j & not (I = R)
+     & (Ex s #k. ShowInvite(R, s) @ k) & not (Ex A #r. RevId(A) @ r) & not (Ex s #r. LeakInvite(s) @ r)"
+
+lemma executable_nearby:
+  exists-trace
+  "Ex I R idI idR skI skR pI pR psk #i #j.
+     PairedNearby(I, R, idI, idR, skR, pR, psk) @ i & PairedNearby(R, I, idR, idI, skI, pI, psk) @ j
+     & not (I = R) & not (Ex A #r. RevId(A) @ r)"
+
+lemma executable_request:
+  exists-trace
+  "Ex O Q idO idQ skO skQ pO pQ psk #i #j.
+     Paired(O, idO, idQ, skQ, pQ, psk) @ i & Paired(Q, idQ, idO, skO, pO, psk) @ j & not (O = Q)
+     & not (Ex s #k. ShowInvite(Q, s) @ k) & not (Ex A #r. RevId(A) @ r)"
+
+/*
+ * Invite and request modes. A device that paired with the holder of identity key idB, whose key
+ * the adversary did not have before the pairing ended, shares the new link secret (psk) with
+ * that device, which paired with it in turn or ran the same pairing; and the adversary never
+ * learns psk. The invite secret does not matter: someone who photographed the QR code can pair
+ * with its owner only as themselves (§4.4).
+ */
+
+lemma link_secret_secret:
+  "All A idA idB skB pB psk #i #k. Paired(A, idA, idB, skB, pB, psk) @ i & K(psk) @ k ==>
+     (Ex B #j #r. Identity(B, idB) @ j & RevId(B) @ r & r < i)
+     | not (Ex B #j. Identity(B, idB) @ j)"
+
+lemma peer_agreed:
+  "All A idA idB skB pB psk #i. Paired(A, idA, idB, skB, pB, psk) @ i ==>
+     (Ex h #j. RRunning(idB, h, psk) @ j & j < i)
+     | (Ex h #j. IRunning(idB, idA, h, psk) @ j & j < i)
+     | (Ex B #j #r. Identity(B, idB) @ j & RevId(B) @ r & r < i)
+     | not (Ex B #j. Identity(B, idB) @ j)"
+
+// The card a device takes is the one its peer's device made: static and presence key.
+lemma peer_keys_authentic:
+  "All A idA idB skB pB psk B #i #j. Paired(A, idA, idB, skB, pB, psk) @ i & Identity(B, idB) @ j ==>
+     (Ex #l #m. Presence(B, pB) @ l & StaticKey(B, skB) @ m)
+     | (Ex #r. RevId(B) @ r & r < i)"
+
+// In invite mode, the scanner's peer is the device that showed the code.
+lemma invite_scanner_gets_the_shower:
+  "All I R idR psk #i. InvitePaired(I, R, idR, psk) @ i ==>
+     Ex #k. Identity(R, idR) @ k
+     & ((Ex h #l. RRunning(idR, h, psk) @ l & l < i) | (Ex #r. RevId(R) @ r & r < i))"
+
+/*
+ * Nearby mode. If both users compared the emoji with the device they picked, each took the other's
+ * card, and the link secret is the adversary's only if the device picked is: no identity key
+ * revealed helps a man in the middle.
+ */
+
+lemma nearby_link_secret_secret:
+  "All A B idA idB skB pB psk #i #k. PairedNearby(A, B, idA, idB, skB, pB, psk) @ i & K(psk) @ k ==>
+     Ex #c. Corrupt(B) @ c"
+
+lemma nearby_peer_is_the_device_picked:
+  "All A B idA idB skB pB psk #i. PairedNearby(A, B, idA, idB, skB, pB, psk) @ i ==>
+     (Ex #j #l #m. Identity(B, idB) @ j & Presence(B, pB) @ l & StaticKey(B, skB) @ m)
+     | (Ex #c. Corrupt(B) @ c)"
+
+/*
+ * Who learns a device's presence key (which recognises its beacons): only those it sent its card
+ * to after authenticating them -- the holder of an identity key it saw proven (a device whose key
+ * leaked, or the adversary as itself, which is whom the user approved or scanned), the device
+ * its user picked and compared emoji with -- or, in invite mode, whoever had the QR code. In
+ * particular, someone who answers an ID request without the ID's key learns nothing (§4.8).
+ */
+
+lemma presence_keys_secret:
+  "All A p #i #k. Presence(A, p) @ i & K(p) @ k ==>
+     (Ex idB B #j #l #r. CardTo(A, idB) @ j & Identity(B, idB) @ l & RevId(B) @ r)
+     | (Ex idB #j. CardTo(A, idB) @ j & not (Ex B #l. Identity(B, idB) @ l))
+     | (Ex s #j #r. InviteCardTo(A, s) @ j & LeakInvite(s) @ r)
+     | (Ex B #j #c. NearbyCardTo(A, B) @ j & Corrupt(B) @ c)"
+
+end

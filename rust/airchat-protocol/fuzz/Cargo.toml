@@ -1,0 +1,103 @@
+# Coverage-guided fuzzing of the protocol's parsers with libFuzzer: `run.sh`, or cargo-fuzz on
+# nightly; see README.md. The targets themselves live in `airchat_protocol::fuzz`.
+[package]
+name = "airchat-protocol-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+airchat-protocol = { path = "..", features = ["fuzzing"] }
+libfuzzer-sys = "0.4"
+
+# A workspace of its own: it builds with coverage instrumentation, the library's builds without.
+[workspace]
+
+
+[[bin]]
+name = "chat_message"
+path = "fuzz_targets/chat_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "envelope"
+path = "fuzz_targets/envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "have"
+path = "fuzz_targets/have.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "padding"
+path = "fuzz_targets/padding.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "roster"
+path = "fuzz_targets/roster.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "group_records"
+path = "fuzz_targets/group_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "text"
+path = "fuzz_targets/text.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "beacons"
+path = "fuzz_targets/beacons.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handshake_first"
+path = "fuzz_targets/handshake_first.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handshake_answer"
+path = "fuzz_targets/handshake_answer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handshake_last"
+path = "fuzz_targets/handshake_last.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "attestation"
+path = "fuzz_targets/attestation.rs"
+test = false
+doc = false
+bench = false

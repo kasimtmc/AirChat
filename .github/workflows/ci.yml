@@ -1,0 +1,112 @@
+# Checks every push to main and every pull request: the protocol and the Rust core (format, clippy,
+# tests, fuzz workspaces, protocol vectors re-derived from the spec), the dependencies (cargo-deny),
+# and the Android app (build and lint). Actions are pinned to commit SHAs (docs/threat-model.md, A11).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  core:
+    name: Rust core
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (rust/rust-toolchain.toml)
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            rust
+            rust/fuzz
+            rust/airchat-protocol/fuzz
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Clippy with the fuzz targets
+        run: |
+          cargo clippy -p airchat-protocol --features fuzzing --all-targets -- -D warnings
+          cargo clippy -p airchat-core --features fuzzing --all-targets -- -D warnings
+      - name: Tests (fuzz targets over mutated vectors included)
+        run: cargo test
+      - name: Fuzz workspaces build
+        run: |
+          (cd fuzz && cargo check)
+          (cd airchat-protocol/fuzz && cargo check)
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Vectors re-derived from the spec
+        run: |
+          pip install --quiet cryptography
+          # Each checker's exit status counts; a failing one prints all its checks.
+          for checker in airchat-protocol/tests/vectors/check_*.py; do
+            output=$(python3 "$checker") || { echo "$output"; exit 1; }
+            echo "$checker: $(tail -n 1 <<< "$output")"
+          done
+
+  deny:
+    name: Dependencies (${{ matrix.workspace }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [rust, rust/fuzz, rust/airchat-protocol/fuzz]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: ${{ matrix.workspace }}/Cargo.toml
+          command: check
+
+  android:
+    name: Android app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Android SDK platform and NDK
+        run: >
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install
+          "platforms;android-37.0" "ndk;29.0.14206865" > /dev/null
+      - name: Rust toolchain and cargo-ndk
+        working-directory: rust
+        run: |
+          rustup toolchain install && rustup show active-toolchain
+          command -v cargo-ndk || cargo install --locked cargo-ndk
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: rust
+          key: android
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Build and lint
+        run: ./gradlew assembleDebug lintDebug

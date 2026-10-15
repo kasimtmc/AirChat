@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["airchat-protocol", "airchat-core", "airchat-ffi", "uniffi-bindgen"]
+# libFuzzer targets, built with coverage instrumentation: a workspace of their own.
+exclude = ["fuzz", "airchat-protocol/fuzz"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[workspace.dependencies]
+airchat-core = { path = "airchat-core" }
+airchat-protocol = { path = "airchat-protocol" }
+uniffi = "0.32.2"
+
+thiserror = "2.0.21"
+zeroize = { version = "1.9.1", features = ["derive"] }
+
+# SQLCipher: the whole database file, including its structure, is encrypted (requirement S-2).
+# OpenSSL is built from source because Android does not expose a system libcrypto.
+rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher-vendored-openssl"] }
+
+# Key derivation and crypto are unusably slow unoptimised; optimise them even in debug builds.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.libcrux-ml-kem]
+opt-level = 3
+
+[profile.release]
+lto = true
+codegen-units = 1
+# Symbols are kept here on purpose: uniffi-bindgen reads its metadata from the built library.
+# The Android Gradle plugin strips the libraries when packaging the APK.

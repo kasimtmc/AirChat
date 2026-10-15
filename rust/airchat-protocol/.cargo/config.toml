@@ -1,0 +1,7 @@
+# Key derivation and post-quantum crypto are unusably slow unoptimised; optimise them even in
+# debug builds. (Inside a larger workspace, its own profile applies instead.)
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.libcrux-ml-kem]
+opt-level = 3

@@ -1,0 +1,83 @@
+# Checks every push to main and every pull request: format, clippy, tests (fuzz targets over
+# mutated vectors included), the fuzz workspace, the test vectors re-derived from the spec by
+# independent scripts, and the dependencies (cargo-deny). Actions are pinned to commit SHAs.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            .
+            fuzz
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets --features fuzzing -- -D warnings
+      - name: Tests (fuzz targets over mutated vectors included)
+        run: cargo test
+      - name: Fuzz workspace builds
+        working-directory: fuzz
+        run: cargo check
+
+  vectors:
+    name: Vectors re-derived from the spec
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Independent checkers
+        run: |
+          pip install --quiet cryptography
+          # Each checker's exit status counts; a failing one prints all its checks.
+          for checker in tests/vectors/check_*.py; do
+            output=$(python3 "$checker") || { echo "$output"; exit 1; }
+            echo "$checker: $(tail -n 1 <<< "$output")"
+          done
+
+  deny:
+    name: Dependencies (${{ matrix.workspace }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [".", fuzz]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: ${{ matrix.workspace }}/Cargo.toml
+          command: check

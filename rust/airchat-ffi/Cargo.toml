@@ -1,0 +1,16 @@
+[package]
+name = "airchat-ffi"
+description = "UniFFI interface of the AirChat core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+airchat-core.workspace = true
+thiserror.workspace = true
+uniffi.workspace = true
+zeroize.workspace = true

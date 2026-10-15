@@ -1,0 +1,237 @@
+theory AirChatLink
+begin
+
+/*
+ * The contact link handshake of docs/protocol.md: recognition tags (§6.2), the three-message
+ * handshake (§6.3) and link keys (§6.8), in the symbolic (Dolev-Yao) model. The network is the
+ * adversary's; it may also learn any device's static key and any link key, at any time.
+ *
+ * Abstractions:
+ * - X-Wing is a perfect KEM: Encaps draws a fresh shared secret, and only the private key
+ *   recovers it from the ciphertext. Its IND-CCA security and X25519/ML-KEM combiner are
+ *   libcrux's and the X-Wing paper's to show, not this model's.
+ * - HKDF, HMAC and SHA-256 are random oracles (free one-way functions). ChaCha20-Poly1305 is
+ *   authenticated encryption with associated data: only the key opens it or makes it, and it
+ *   binds nonce and associated data. The transcript hash `h` is the associated data, so the
+ *   model's `h` is the whole transcript, hashed step by step as in §6.3.
+ * - A run of MixHash calls is one hash of their inputs, in order; MixKey derives the chaining key
+ *   and the cipher key with two functions of the same inputs.
+ * - Identities: the public names $A, $B stand for the identity keys IK, which the handshake only
+ *   hashes. Each device has one static key (§6.9's weekly versions are not modelled).
+ * - Pairing (§4) is not modelled here: it gives both sides the same fresh psk and each other's
+ *   static key, out of band.
+ * - Link keys (§6.8): each handshake is made with a link key both sides hold, which the
+ *   adversary may learn at any time. A pair may get any number of them (rule Link_key): the
+ *   pairing secret, and the keys earlier handshakes made. The model does not feed a handshake's
+ *   next key back into later handshakes, which would make every proof unfold the whole chain of
+ *   earlier handshakes; instead the healing lemmas show that a handshake the adversary stayed
+ *   out of makes a next key it never learns, so the handshake after it is made with a key as
+ *   good as a fresh secret one, which is what Link_key gives. Deleting old keys (devices keep
+ *   four at most) is not modelled.
+ * - The tag's epoch and the payloads' contents are left out; payloads are constants.
+ */
+
+builtins: hashing
+
+functions: kempk/1, kemenc/2, kemdec/2,
+           kdfck/2, kdfk/2, split1/1, split2/1, nextkey/1,
+           tagkey/3, mac/2,
+           aead/4, adec/4
+
+equations: kemdec(kemenc(ss, kempk(sk)), sk) = ss,
+           adec(k, n, ad, aead(k, n, ad, p)) = p
+
+restriction one_static_key_each:
+  "All A #i #j. Register(A) @ i & Register(A) @ j ==> #i = #j"
+
+restriction not_with_oneself:
+  "All a b #i. Neq(a, b) @ i ==> not (a = b)"
+
+// The responder accepts each tag nonce once (§6.2).
+restriction tag_nonce_once:
+  "All B n #i #j. TagSeen(B, n) @ i & TagSeen(B, n) @ j ==> #i = #j"
+
+rule Register_static_key:
+    [ Fr(~sk) ]
+  --[ Register($A), Static($A, ~sk) ]->
+    [ !Ltk($A, ~sk), !Pk($A, kempk(~sk)), Out(kempk(~sk)) ]
+
+// A link key A and B share: the pairing secret, or one an earlier handshake made (see above).
+rule Link_key:
+    [ Fr(~lk), !Pk($A, pkA), !Pk($B, pkB) ]
+  --[ Neq($A, $B) ]->
+    [ !LK($A, $B, ~lk), !LK($B, $A, ~lk) ]
+
+rule Reveal_static_key:
+    [ !Ltk(A, sk) ]
+  --[ RevStatic(A) ]->
+    [ Out(sk) ]
+
+rule Reveal_link_key:
+    [ !LK(A, B, lk) ]
+  --[ RevLK(lk) ]->
+    [ Out(lk) ]
+
+// Message 1, initiator A to responder B, made with link key lk.
+rule I_1:
+  let pkA = kempk(skA)
+      h0  = h('AirChat v1 link-contact')
+      h1  = h(<h0, $A, pkA, $B, pkB>)
+      ck1 = kdfck(h0, lk)
+      tag = <~nt, mac(tagkey(lk, $A, $B), ~nt)>
+      epk = kempk(~e)
+      ct1 = kemenc(~ss1, pkB)
+      h2  = h(<h1, '1', tag, epk, ct1>)
+      ck2 = kdfck(ck1, ~ss1)
+      k2  = kdfk(ck1, ~ss1)
+      c1  = aead(k2, '0', h2, 'empty')
+      h3  = h(<h2, c1>)
+  in
+    [ !Ltk($A, skA), !Pk($B, pkB), !LK($A, $B, lk), Fr(~e), Fr(~nt), Fr(~ss1) ]
+  --[ IStart($A, $B, lk, epk), Ephemeral(~e), Encap(~ss1, pkB) ]->
+    [ Out(<'1', tag, epk, ct1, c1>), I_1($A, $B, skA, lk, ~e, h3, ck2) ]
+
+// Message 2: B recognises A's tag, opens c1, encapsulates to e and to A's static key.
+rule R_1:
+  let pkB = kempk(skB)
+      h0  = h('AirChat v1 link-contact')
+      h1  = h(<h0, $A, pkA, $B, pkB>)
+      ck1 = kdfck(h0, lk)
+      tag = <nt, mac(tagkey(lk, $A, $B), nt)>
+      ct1 = kemenc(ss1, pkB)
+      h2  = h(<h1, '1', tag, epk, ct1>)
+      ck2 = kdfck(ck1, ss1)
+      k2  = kdfk(ck1, ss1)
+      c1  = aead(k2, '0', h2, 'empty')
+      h3  = h(<h2, c1>)
+      ct2 = kemenc(~ss2, epk)
+      h4  = h(<h3, '2', ct2>)
+      ck3 = kdfck(ck2, ~ss2)
+      ct3 = kemenc(~ss3, pkA)
+      h5  = h(<h4, ct3>)
+      ck4 = kdfck(ck3, ~ss3)
+      k4  = kdfk(ck3, ~ss3)
+      c2  = aead(k4, '0', h5, 'payload2')
+      h6  = h(<h5, c2>)
+  in
+    [ !Ltk($B, skB), !Pk($A, pkA), !LK($B, $A, lk), In(<'1', tag, epk, ct1, c1>), Fr(~ss2), Fr(~ss3) ]
+  --[ TagSeen($B, nt), Encap(~ss2, epk), Encap(~ss3, pkA),
+      RRunning($B, $A, lk, split1(ck4), split2(ck4), nextkey(ck4), epk) ]->
+    [ Out(<'2', ct2, ct3, c2>), R_1($B, $A, lk, k4, h6, ck4, epk) ]
+
+// Message 3: A opens c2, so B is authenticated to it; A answers. (It then keeps the next link
+// key, nextkey(ck4); see the header.)
+rule I_2:
+  let ct2 = kemenc(ss2, kempk(~e))
+      ct3 = kemenc(ss3, kempk(skA))
+      h4  = h(<h3, '2', ct2>)
+      ck3 = kdfck(ck2, ss2)
+      h5  = h(<h4, ct3>)
+      ck4 = kdfck(ck3, ss3)
+      k4  = kdfk(ck3, ss3)
+      c2  = aead(k4, '0', h5, 'payload2')
+      h6  = h(<h5, c2>)
+      h7  = h(<h6, '3'>)
+      c3  = aead(k4, '1', h7, 'payload3')
+  in
+    [ I_1(A, B, skA, lk, ~e, h3, ck2), In(<'2', ct2, ct3, c2>) ]
+  --[ IDone(A, B, lk, split1(ck4), split2(ck4), nextkey(ck4), kempk(~e)) ]->
+    [ Out(<'3', c3>) ]
+
+// B opens c3, so A is authenticated to it. (It then keeps the next link key too.)
+rule R_2:
+  let h7 = h(<h6, '3'>)
+      c3 = aead(k4, '1', h7, 'payload3')
+  in
+    [ R_1(B, A, lk, k4, h6, ck4, epk), In(<'3', c3>) ]
+  --[ RDone(B, A, lk, split1(ck4), split2(ck4), nextkey(ck4), epk) ]->
+    [ ]
+
+/*
+ * Helpers, proved first and then used by the proofs below: they say who can know a KEM's shared
+ * secret and a private key, which cuts the many ways the adversary could pass one handshake's
+ * ciphertext off as another's.
+ */
+
+// Ephemeral keys never leave the device (§6.3: deleted after message 2).
+lemma ephemeral_keys_secret [reuse]:
+  "All e #i #k. Ephemeral(e) @ i & K(e) @ k ==> F"
+
+// A static key is known only once revealed.
+lemma static_keys_secret [reuse]:
+  "All A sk #i #k. Static(A, sk) @ i & K(sk) @ k ==> Ex #r. RevStatic(A) @ r & r < k"
+
+// An encapsulated secret is known only if it went to a revealed static key or to a key of the
+// adversary's own (neither a device's static key nor an ephemeral one).
+lemma encapsulated_secrets [reuse]:
+  "All ss pk #i #k. Encap(ss, pk) @ i & K(ss) @ k ==>
+     (Ex A sk #j #r. Static(A, sk) @ j & pk = kempk(sk) & RevStatic(A) @ r & r < k)
+     | (not (Ex A sk #j. Static(A, sk) @ j & pk = kempk(sk))
+        & not (Ex e #j. Ephemeral(e) @ j & pk = kempk(e)))"
+
+/* Sanity: the handshake can complete. */
+
+lemma executable:
+  exists-trace
+  "Ex A B lk ki kr n e #i #j.
+     IDone(A, B, lk, ki, kr, n, e) @ i & RDone(B, A, lk, ki, kr, n, e) @ j
+     & not (Ex X #r. RevStatic(X) @ r) & not (Ex x #r. RevLK(x) @ r)"
+
+/*
+ * Secrecy of the transport keys, for each side, with forward secrecy and key-compromise
+ * impersonation resistance: the adversary learns them only if, before the handshake ended, it
+ * had both the link key used and the static key of the side the device talks to. Its own
+ * static key, and everything learnt after the handshake, do not help (§6.5).
+ */
+
+lemma initiator_send_key_secret:
+  "All A B lk ki kr n e #i #k. IDone(A, B, lk, ki, kr, n, e) @ i & K(ki) @ k ==>
+     (Ex #r. RevStatic(B) @ r & r < i) & (Ex #l. RevLK(lk) @ l & l < i)"
+
+lemma initiator_receive_key_secret:
+  "All A B lk ki kr n e #i #k. IDone(A, B, lk, ki, kr, n, e) @ i & K(kr) @ k ==>
+     (Ex #r. RevStatic(B) @ r & r < i) & (Ex #l. RevLK(lk) @ l & l < i)"
+
+lemma responder_send_key_secret:
+  "All B A lk ki kr n e #i #k. RDone(B, A, lk, ki, kr, n, e) @ i & K(kr) @ k ==>
+     (Ex #r. RevStatic(A) @ r & r < i) & (Ex #l. RevLK(lk) @ l & l < i)"
+
+lemma responder_receive_key_secret:
+  "All B A lk ki kr n e #i #k. RDone(B, A, lk, ki, kr, n, e) @ i & K(ki) @ k ==>
+     (Ex #r. RevStatic(A) @ r & r < i) & (Ex #l. RevLK(lk) @ l & l < i)"
+
+/*
+ * Mutual authentication: when a side finishes, the other ran the same handshake with it (same
+ * identities, link key and keys), and no other run of this side ended with the same keys, under
+ * the same conditions as secrecy.
+ */
+
+lemma initiator_injective_agreement:
+  "All A B lk ki kr n e #i. IDone(A, B, lk, ki, kr, n, e) @ i ==>
+     (Ex #j. RRunning(B, A, lk, ki, kr, n, e) @ j & j < i
+        & not (Ex A2 B2 lk2 e2 #i2. IDone(A2, B2, lk2, ki, kr, n, e2) @ i2 & not (#i2 = #i)))
+     | ((Ex #r. RevStatic(B) @ r & r < i) & (Ex #l. RevLK(lk) @ l & l < i))"
+
+lemma responder_injective_agreement:
+  "All B A lk ki kr n e #i. RDone(B, A, lk, ki, kr, n, e) @ i ==>
+     (Ex #j. IDone(A, B, lk, ki, kr, n, e) @ j & j < i
+        & not (Ex B2 A2 lk2 e2 #i2. RDone(B2, A2, lk2, ki, kr, n, e2) @ i2 & not (#i2 = #i)))
+     | ((Ex #r. RevStatic(A) @ r & r < i) & (Ex #l. RevLK(lk) @ l & l < i))"
+
+/*
+ * Healing (post-compromise security, §6.8): a handshake the adversary did not take part in --
+ * the initiator heard the honest responder's message 2, or the responder heard the honest
+ * initiator's ephemeral key -- yields keys and a next link key the adversary never learns, even
+ * if it knew every static key and link key all along. The next handshake is made with that link
+ * key, so by the lemmas above it is safe again from impersonation of either side.
+ */
+
+lemma healing_initiator:
+  "All A B lk ki kr n e #i #j. IDone(A, B, lk, ki, kr, n, e) @ i & RRunning(B, A, lk, ki, kr, n, e) @ j ==>
+     not (Ex #k. K(n) @ k) & not (Ex #k. K(ki) @ k) & not (Ex #k. K(kr) @ k)"
+
+lemma healing_responder:
+  "All B A lk ki kr n e #i #j. RDone(B, A, lk, ki, kr, n, e) @ i & IStart(A, B, lk, e) @ j ==>
+     not (Ex #k. K(n) @ k) & not (Ex #k. K(ki) @ k) & not (Ex #k. K(kr) @ k)"
+
+end

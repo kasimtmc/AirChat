@@ -1,0 +1,44 @@
+# cargo-deny: what the Rust dependencies may be. Run `cargo deny check` here, and
+# `cargo deny --manifest-path fuzz/Cargo.toml check` for the fuzz workspace (this file is found from there).
+# A dependency is code that runs inside every app built on this library: it must be free of known
+# advisories, come from crates.io, and allow use in closed-source apps too.
+
+[advisories]
+# RustSec advisories, unmaintained crates included, fail the check unless listed here with a reason.
+ignore = [
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2, unmaintained: a build-time macro of hax-lib, libcrux's verification annotations; none of it ships. Goes when libcrux moves off it." },
+]
+
+[licenses]
+# Permissive licences only, so that the library stays usable under MIT OR Apache-2.0.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+# The two workspaces share this list, so a licence one of them lacks is no news.
+unused-allowed-license = "allow"
+exceptions = [
+    # LLVM's libFuzzer, for `fuzz` only; nothing of it ships.
+    { allow = ["NCSA"], crate = "libfuzzer-sys" },
+]
+
+[bans]
+# Two versions of one crate are worth knowing about, not failing on.
+multiple-versions = "warn"
+wildcards = "deny"
+# Path dependencies (the fuzz crate's) have no version.
+allow-wildcard-paths = true
+
+[sources]
+# crates.io only: no git dependencies, no other registries.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
