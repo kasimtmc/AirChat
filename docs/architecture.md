@@ -1,6 +1,6 @@
 # AirChat — Architecture
 
-Status: **v0.2** (2026-10-14), describing the Android app as built. Requirements referenced as `S-2`, `T-1`, … are in
+Status: **v0.2** (2026-10-15), describing the Android app as built. Requirements referenced as `S-2`, `T-1`, … are in
 [requirements.md](requirements.md).
 
 ## 1. Layers
