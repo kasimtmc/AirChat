@@ -1634,6 +1634,90 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn a_second_update_of_the_same_epoch_is_ignored() {
+        let mut net = kamp();
+        let cem = net.identity(CEM);
+        let row = net.group(AYSE).row;
+        let (_, actions) = net.node(AYSE).remove_group_member(row, &cem).unwrap();
+        net.run(AYSE, actions);
+        assert_eq!((net.group(BURAK).epoch, net.group(BURAK).members), (1, 2));
+        // Another epoch 1, validly signed by the admin, with Cem back in: the first one stands
+        // (threat model, weakness 15: there is no rule yet for picking one of two).
+        let other = {
+            let ayse = net.devices[AYSE].node.account().unwrap();
+            let burak = net.devices[BURAK].node.account().unwrap();
+            let held = burak.db().group(net.group(BURAK).row).unwrap().unwrap();
+            let cem_stored = net.devices[CEM]
+                .node
+                .account()
+                .unwrap()
+                .db()
+                .group(net.group(CEM).row)
+                .unwrap()
+                .unwrap();
+            let roster = Roster::new(held.group_id, 1, "Kamp", cem_stored.roster.members().to_vec()).unwrap();
+            group::seal_update(&roster, &SecretBytes::random().unwrap(), ayse.identity()).unwrap()
+        };
+        let from = net.contact(BURAK, AYSE);
+        assert!(net.node(BURAK).take_update(from, other).is_empty());
+        assert_eq!((net.group(BURAK).epoch, net.group(BURAK).members), (1, 2));
+    }
+
+    #[test]
+    fn group_messages_are_stored_once_and_tampered_ones_not_at_all() {
+        let mut net = kamp();
+        let row = net.group(AYSE).row;
+        let (group_id, key) = {
+            let stored = net.devices[AYSE]
+                .node
+                .account()
+                .unwrap()
+                .db()
+                .group(row)
+                .unwrap()
+                .unwrap();
+            (stored.group_id, stored.epoch_key.clone())
+        };
+        let sealed = {
+            let ayse = net.devices[AYSE].node.account().unwrap();
+            group::seal_message(
+                &group_id,
+                0,
+                &key,
+                &[5; 16],
+                ayse.identity(),
+                1,
+                &Content::Text(Zeroizing::new("bir kez".into())),
+            )
+            .unwrap()
+        };
+        let from = net.contact(BURAK, AYSE);
+        net.node(BURAK).take_group_message(from, &sealed);
+        // Coming again, by another way or replayed, it is acknowledged and not stored twice.
+        let (actions, ack) = net.node(BURAK).take_group_message(from, &sealed);
+        assert!(actions.is_empty());
+        assert!(ack.is_some());
+        assert_eq!(net.texts(BURAK), ["bir kez"]);
+        // Any byte changed breaks it: the signature, or the ciphertext under it.
+        let mut tampered = group::seal_message(
+            &group_id,
+            0,
+            &key,
+            &[6; 16],
+            net.devices[AYSE].node.account().unwrap().identity(),
+            2,
+            &Content::Text(Zeroizing::new("değişti".into())),
+        )
+        .unwrap();
+        for at in [tampered.len() - 1, tampered.len() - 80] {
+            tampered[at] ^= 1;
+            net.node(BURAK).take_group_message(from, &tampered);
+            tampered[at] ^= 1;
+        }
+        assert_eq!(net.texts(BURAK), ["bir kez"]);
+    }
+
+    #[test]
     fn an_admin_deletes_the_group_for_everyone() {
         let mut net = kamp();
         net.say(BURAK, "Çadır bende");
