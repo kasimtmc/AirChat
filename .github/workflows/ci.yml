@@ -1,11 +1,11 @@
-# Checks every push to main and every pull request: the protocol and the Rust core (format, clippy,
+# Checks every push to master and every pull request: the protocol and the Rust core (format, clippy,
 # tests, fuzz workspaces, protocol vectors re-derived from the spec), the dependencies (cargo-deny),
 # and the Android app (build and lint). Actions are pinned to commit SHAs (docs/threat-model.md, A11).
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
   workflow_dispatch:
 

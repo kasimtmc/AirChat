@@ -100,7 +100,7 @@ To make a release:
 
 ## Checks
 
-GitHub Actions runs all of these on every push to `main` and every pull request
+GitHub Actions runs all of these on every push to `master` and every pull request
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)). To run them yourself:
 
 ```sh
