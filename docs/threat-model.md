@@ -218,7 +218,7 @@ security patch level and, through its certificates, roughly its maker.
 |---|---|---|---|
 | Confidentiality of content | A1–A4, A7, A10; A5/A6 for what is not theirs | the recipient's device or the OS is compromised (A9) | §6, §8, §9, §10, §12 |
 | Authenticity of content | A1–A4, A7 | keys copied from a device (A8), for a while; mesh envelopes until re-pairing | §6.5, §10.6 |
-| Forward secrecy | everyone, for links and calls | mesh texts not sealed to a one-time prekey, until read | §6.5, §10.6 |
+| Forward secrecy | everyone, for links and calls; mesh texts sealed to a one-time prekey once read | mesh texts until read; those sealed to the static key (no prekey left) and acknowledgements until that key is deleted: at least 25 hours after the next weekly one, longer while a contact has not taken that yet | §6.5, §6.9, §10.6 |
 | Post-compromise security | A8 after the fact | identity key never changes; mesh envelopes until re-pairing | S-7, §6.8, §6.9 |
 | No identifiers on the air | A1–A4 | within one hour (stable tokens); radio fingerprinting | §5, §7, S-8 |
 | Hiding the social graph from relays | A4 | timing correlation by many colluding relays | §10.6, §12.4 |

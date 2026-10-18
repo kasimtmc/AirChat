@@ -377,6 +377,55 @@ mod tests {
         assert_eq!(net.node(CEM).prekeys.own_count(ayse), TARGET - 1);
     }
 
+    /// Someone records the envelope on its way, then takes Cem's device after he read it: the key
+    /// that opens it is in neither memory nor storage any more (§10.6).
+    #[test]
+    fn a_recorded_envelope_cannot_be_opened_from_the_device_once_read() {
+        let mut net = met_then_apart();
+        let ayse = net.contact(CEM, AYSE);
+        let cem = net.contact(AYSE, CEM);
+        // Recorded at Burak while Cem is out of reach, delivered once he is back.
+        cut_mesh(&mut net, BURAK, CEM);
+        let (_, actions) = net.node(AYSE).send_message(cem, "kaydedildi").unwrap();
+        net.run(AYSE, actions);
+        let recorded = held_text(&mut net);
+        let prekey = mesh::sealed_to(&recorded).unwrap();
+        assert_ne!(prekey, mesh::STATIC_KEY);
+        assert!(
+            net.node(CEM).prekeys.own_key(ayse, prekey).is_some(),
+            "until read, Cem can open it"
+        );
+        mesh_link(&mut net, BURAK, CEM);
+        assert_eq!(statuses(&net, CEM, AYSE)[0].1, MessageStatus::Received);
+        assert!(net.node(CEM).prekeys.own_key(ayse, prekey).is_none(), "not in memory");
+        let stored = net.node(CEM).account().unwrap().db().own_prekeys(0).unwrap();
+        assert!(
+            !stored.iter().any(|k| k.contact == ayse && k.prekey == prekey),
+            "not in storage"
+        );
+        // Every key the device still holds fails on it.
+        let (from, to) = (net.identity(AYSE), net.identity(CEM));
+        let psk = net
+            .node(CEM)
+            .account()
+            .unwrap()
+            .db()
+            .contact(ayse)
+            .unwrap()
+            .unwrap()
+            .link_psk;
+        let pair = mesh::Pair {
+            from: &from,
+            to: &to,
+            psk: &psk,
+        };
+        let node = &net.devices[CEM].node;
+        let statics: Vec<_> = node.account().unwrap().static_keys().map(|(_, key)| key).collect();
+        for key in node.prekeys.own.values().chain(statics) {
+            assert!(mesh::open(&pair, key, &recorded).is_err());
+        }
+    }
+
     #[test]
     fn without_prekeys_texts_are_sealed_to_the_static_key() {
         let mut net = Net::new(&["Ayşe", "Burak", "Cem"]);
