@@ -1,6 +1,6 @@
 # AirChat — Threat model
 
-Status: **draft v0.2** (2026-10-18), written to prepare an independent audit (requirement S-11).
+Status: **draft v0.2** (2026-10-19), written to prepare an independent audit (requirement S-11).
 It says what AirChat protects, from whom, on what it relies, and where it knowingly falls short.
 Details are in [protocol.md](../rust/airchat-protocol/docs/protocol.md) (`§`), [requirements.md](requirements.md) (`S-2`, `AP-4`, …)
 and [architecture.md](architecture.md) (`arch §`). Where this document and those disagree, they win
@@ -112,6 +112,11 @@ mesh links are not authenticated, so anyone can be a relay (§10.2).
   Many colluding relays around a victim learn more about timing; there is no cover traffic.
 - **Holds nothing:** relays and providers keep envelopes in memory for minutes only, never for
   recipients out of reach (AP-6).
+- **Always-on providers** (the provider app, AP-8, planned): a phone left running as a provider
+  sees what any provider sees, but all the time, so someone who runs many makes the timing
+  analysis above cheaper. Taken, such a phone gives up nothing of anyone: no account, contacts or
+  messages are on it, only its own relay keys. There is no registry of providers (AP-9), so none
+  maps who offers one or where AirChat is used, and nobody's use of a provider leaves their device.
 
 ### A5. Malicious contact
 

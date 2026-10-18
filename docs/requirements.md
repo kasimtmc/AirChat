@@ -1,6 +1,6 @@
 # AirChat — Requirements
 
-Status: **v0.2** (2026-10-15): everything here is implemented on Android unless marked otherwise.
+Status: **v0.2** (2026-10-19): everything here is implemented on Android unless marked otherwise.
 This document records product decisions; change it when a decision changes.
 
 ## 1. Vision
@@ -144,7 +144,11 @@ Nobody but the user can read the user's data, during or after transmission.
   carries other devices' calls, push-to-talk, video and files over Wi-Fi (paths, protocol §12).
   There are no user-chosen levels: what it carries
   at a given moment follows AP-5, and routing knows it (AP-7), so a provider that cannot carry
-  something never breaks it, it is simply not chosen for it.
+  something never breaks it, it is simply not chosen for it. *(2026-10-19, planned)* Only on devices
+  with Wi-Fi Aware: a provider must be found as far as Wi-Fi reaches (protocol §7.4), not only
+  within Bluetooth range. On a phone without it the switch is not offered, and the app says why.
+  (Reaching providers through a Wi-Fi network of their own instead was rejected: Android asks the
+  user every time and drops their Wi-Fi meanwhile.)
 - **AP-2** Providers connect to each other to form a multi-hop backbone.
 - **AP-3** **Anyone** can use a provider. Rate limiting protects against abuse.
 - **AP-4** Providers only see ciphertext and rotating pseudonymous routing addresses. They cannot read,
@@ -168,6 +172,28 @@ Nobody but the user can read the user's data, during or after transmission.
 - **AP-6** *(2026-10-13: replaced)* Air Providers keep nothing for recipients out of reach: like
   every device they hold what they pass on for a few minutes only, in memory. The sender keeps its
   messages until they are delivered or given up (M-8).
+- **AP-8** *(2026-10-19, planned)* **Provider app.** A separate Android app
+  (`com.plyg.airchat.provider`, a build of the same code) turns a spare phone with Wi-Fi Aware into
+  an always-on provider. Nothing of a user is on it: no account, contacts or messages, and no code
+  for them. It starts with the phone and stays on while charging; its only keys are its own, in the
+  Android Keystore. Setting it up is installing it, granting the radios and pressing start, with
+  nothing to register. Its screen shows how much it carries, never whom.
+- **AP-9** *(2026-10-19)* **No registry.** Providers are not registered, listed, approved or
+  named: no Wi-Fi network names that say AirChat, no list of providers in the app or online, no
+  sign-up form, no reports about providers leaving a device. A list shipped in the app can be read
+  out of it by anyone, and would map where AirChat is used and who offers it; it would protect
+  nothing either, as providers see only ciphertext (AP-4). What a device learns about providers'
+  quality stays on it.
+- **AP-10** *(2026-10-19, planned)* **Wi-Fi check.** The app tells the user whether the Wi-Fi they
+  are on lets AirChat devices find each other (no client isolation, multicast passes), and a guide
+  tells router owners how to make a network AirChat-friendly: a guest network apart from their own,
+  with client isolation off. Nothing about the network is recorded or sent.
+- **AP-11** *(2026-10-19)* **Linux providers wait.** A provider on Linux (a mini PC, a Raspberry
+  Pi, a router) needs Wi-Fi Aware too, which Linux drivers do not offer yet: the kernel gained the
+  interfaces for it in 2026, and Intel is adding them to the driver of its Wi-Fi 7 cards; other
+  chips have none. Once Wi-Fi Aware is common on Linux, an exploration comes first (a Linux device
+  and an Android phone finding each other and opening a data path), then a headless provider
+  service over the same Rust core.
 
 ## 5. Security and privacy
 

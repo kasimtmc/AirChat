@@ -131,6 +131,8 @@ allows permissive licences only: run `cargo deny check` in `rust/airchat-protoco
 
 - An independent security audit. The contact link handshake, pairing, group keys and mesh
   envelopes are modelled formally (`rust/airchat-protocol/formal/`).
+- An Air Provider app that turns a spare phone with Wi-Fi Aware into an always-on provider, with
+  nothing of a user on it and no registry.
 - Reproducible builds.
 - Wi-Fi Aware tested end to end between two phones that have it.
 - iOS and Linux apps, sharing the same Rust core.

@@ -1,6 +1,6 @@
 # AirChat — Architecture
 
-Status: **v0.2** (2026-10-18), describing the Android app as built. Requirements referenced as `S-2`, `T-1`, … are in
+Status: **v0.2** (2026-10-19), describing the Android app as built. Requirements referenced as `S-2`, `T-1`, … are in
 [requirements.md](requirements.md).
 
 ## 1. Layers
@@ -672,6 +672,23 @@ Implemented so far (Android, `app/src/main/java/com/plyg/airchat/net/`):
   for members of other clusters through providers every 30 s (tagged with a key every member holds,
   the nonce naming its head so its own cluster stays silent), so separate clusters join into one.
   A direct channel link replaces one over a path.
+- **Provider devices** (requirements AP-1, AP-8 to AP-11; planned, 2026-10-19). The provider app
+  is a build of this code with the account, contacts and conversations left out, and the node in a
+  provider-only mode: mesh links, paths and the backbone between providers (AP-2), nothing else. It
+  is found over Wi-Fi Aware (or a shared network, §7.2), never through a Wi-Fi network of its own,
+  so it needs a phone with Wi-Fi Aware; others reach it through the mesh. It stores nothing of anyone:
+  what it passes on stays in memory as on every device (10 minutes, 8 MiB), and its keys are its
+  own, in the Keystore, with no PIN since there is nothing of a user to protect. Plan, each step
+  released only past its gate:
+  1. Documents (this). Gate: no provider gains anything it can read or change.
+  2. The Wi-Fi check (AP-10). Gate: nothing about the network leaves the device; mDNS names stay
+     random.
+  3. The provider app (AP-8), and the Air Provider switch tied to Wi-Fi Aware (AP-1). Gate: a test
+     shows no envelope, message or contact in the provider's storage after it carried traffic, and
+     its beacons are those of any phone.
+  4. Before release: a Tamarin model of paths (§12), long fuzzing of what reaches a provider, abuse
+     limits (AP-3), and the provider app in the audit's scope.
+  5. Linux providers once Wi-Fi Aware is common there (AP-11).
 - Routing uses rotating pseudonymous addresses derived from secrets shared between the communicating
   contacts, so relays cannot tell who is talking to whom (`AP-4`).
 - Hop budget: messages through the mesh, 8 hops; files 6 providers; voice and push-to-talk 4; video 2.
@@ -688,6 +705,8 @@ through providers was dropped on 2026-10-13: senders keep their messages, M-8.) 
   of the contact link handshake, pairing, group keys and mesh envelopes
   (`rust/airchat-protocol/formal/`) and hours of fuzzing of every target are done; an independent
   audit remains.
+- **Air Provider app** (AP-8 to AP-10): spare phones with Wi-Fi Aware as always-on providers, with
+  no registry (§7, provider devices).
 - **Wi-Fi Aware end to end:** needs a second phone that has it.
 - **Releases:** reproducible builds, a store or other way to distribute beyond GitHub releases.
 - **iOS and Linux (P-2):** platform code over the same Rust core.
