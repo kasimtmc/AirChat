@@ -418,21 +418,21 @@ class LanTransport(
             return "${bytes.toHex()}/$prefixLength"
         }
 
-        /** Whether [a] and [b] agree in their first [prefixLength] bits. */
-        fun sameSubnet(a: InetAddress, b: InetAddress, prefixLength: Int): Boolean {
-            val x = a.address
-            val y = b.address
-            if (x.size != y.size || prefixLength !in 0..8 * x.size) return false
-            for (i in x.indices) {
-                val kept = (prefixLength - 8 * i).coerceIn(0, 8)
-                val mask = 0xff shl (8 - kept) and 0xff
-                if (x[i].toInt() and mask != y[i].toInt() and mask) return false
-            }
-            return true
-        }
-
         fun String.hexToBytesOrNull(): ByteArray? =
             if (length % 2 != 0 || any { it !in "0123456789abcdef" }) null
             else chunked(2).map { it.toInt(16).toByte() }.toByteArray()
     }
+}
+
+/** Whether [a] and [b] agree in their first [prefixLength] bits. */
+internal fun sameSubnet(a: InetAddress, b: InetAddress, prefixLength: Int): Boolean {
+    val x = a.address
+    val y = b.address
+    if (x.size != y.size || prefixLength !in 0..8 * x.size) return false
+    for (i in x.indices) {
+        val kept = (prefixLength - 8 * i).coerceIn(0, 8)
+        val mask = 0xff shl (8 - kept) and 0xff
+        if (x[i].toInt() and mask != y[i].toInt() and mask) return false
+    }
+    return true
 }

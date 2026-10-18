@@ -177,6 +177,15 @@
     <string name="air_provider_warning">Your phone will carry other people\'s calls, video and files, encrypted, over Wi-Fi. This uses battery: above 50% it carries everything, from 20% calls only, and below 20% or when the phone gets hot it turns itself off. Calls and files it took on are carried to the end. It keeps nothing for people out of reach.</string>
     <string name="air_provider_turn_on">Turn on</string>
     <string name="air_provider_unsupported">This phone has no Wi-Fi Aware, which a provider needs so that others find it as far as Wi-Fi reaches. You can still use other people\'s providers.</string>
+    <string name="wifi_check">Check this Wi-Fi</string>
+    <string name="wifi_check_running">Listening on the network for a few seconds…</string>
+    <string name="wifi_check_no_wifi">You are not on a Wi-Fi network.</string>
+    <string name="wifi_check_works">AirChat works on this Wi-Fi: this phone is connected to another AirChat device over it right now.</string>
+    <string name="wifi_check_heard">Other devices can be heard on this Wi-Fi, so AirChat devices on it most likely find each other. It is certain once one connects over it.</string>
+    <string name="wifi_check_none">No other device can be heard on this Wi-Fi. Either nobody else is on it, or it keeps devices apart, as many café and hotel networks do. AirChat then connects nearby devices directly, without the network.</string>
+    <string name="wifi_check_private">Nothing about the network is recorded or sent.</string>
+    <string name="wifi_guide_title">If the router is yours</string>
+    <string name="wifi_guide">Open a guest network apart from your own, and turn off client isolation (also called AP or guest isolation) on it, leaving multicast on. Keep your own devices on your own network: guests then reach each other, never your devices. Do not give it a name that says AirChat: everyone around sees network names.</string>
     <string name="air_provider_stopped">Air Provider turned off: the battery is low or the phone is hot.</string>
     <string name="channel_status">Status</string>
     <string name="call_via_provider">Out of range: connecting through Air Providers. The call starts once connected.</string>

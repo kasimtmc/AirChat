@@ -284,6 +284,7 @@ fun AirChatApp(viewModel: AppViewModel, biometric: BiometricPrompter) {
                         onReceiveWhileLockedChange = viewModel::setReceiveWhileLocked,
                         onAcceptRequestsChange = viewModel::setAcceptRequests,
                         onAirProviderChange = viewModel::setAirProvider,
+                        onCheckWifi = viewModel::checkWifi,
                         onTransportChange = viewModel::setTransportEnabled,
                         onDirectContactLinksChange = viewModel::setDirectContactLinks,
                         onBiometricChange = { enable ->

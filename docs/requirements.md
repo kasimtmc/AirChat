@@ -184,10 +184,12 @@ Nobody but the user can read the user's data, during or after transmission.
   out of it by anyone, and would map where AirChat is used and who offers it; it would protect
   nothing either, as providers see only ciphertext (AP-4). What a device learns about providers'
   quality stays on it.
-- **AP-10** *(2026-10-19, planned)* **Wi-Fi check.** The app tells the user whether the Wi-Fi they
+- **AP-10** *(2026-10-19)* **Wi-Fi check.** The app tells the user whether the Wi-Fi they
   are on lets AirChat devices find each other (no client isolation, multicast passes), and a guide
   tells router owners how to make a network AirChat-friendly: a guest network apart from their own,
-  with client isolation off. Nothing about the network is recorded or sent.
+  with client isolation off. Nothing about the network is recorded or sent. In the settings, on
+  request only: certain when linked to an AirChat device over it, likely when other devices are
+  heard on it, and otherwise the guide.
 - **AP-11** *(2026-10-19)* **Linux providers wait.** A provider on Linux (a mini PC, a Raspberry
   Pi, a router) needs Wi-Fi Aware too, which Linux drivers do not offer yet: the kernel gained the
   interfaces for it in 2026, and Intel is adding them to the driver of its Wi-Fi 7 cards; other

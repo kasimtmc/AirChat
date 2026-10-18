@@ -62,6 +62,7 @@ import com.plyg.airchat.net.ConnectionHub
 import com.plyg.airchat.net.NetEvent
 import com.plyg.airchat.net.Peer
 import com.plyg.airchat.net.TransportKind
+import com.plyg.airchat.net.WifiCheck
 import com.plyg.airchat.runtime.AirProvider
 import com.plyg.airchat.runtime.CallUi
 import com.plyg.airchat.runtime.TalkRefusal
@@ -458,6 +459,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Air Provider mode (requirements AP-1, AP-5); the screen warns about the battery first. */
     fun setAirProvider(enabled: Boolean) = runtime.airProvider.setEnabled(enabled)
+
+    /** The Wi-Fi check (requirements AP-10); takes a few seconds. */
+    suspend fun checkWifi(): WifiCheck.Result = runtime.checkWifi()
 
     // Permissions.
 

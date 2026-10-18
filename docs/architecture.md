@@ -682,7 +682,10 @@ Implemented so far (Android, `app/src/main/java/com/plyg/airchat/net/`):
   released only past its gate:
   1. Documents (this). Gate: no provider gains anything it can read or change.
   2. The Wi-Fi check (AP-10). Gate: nothing about the network leaves the device; mDNS names stay
-     random.
+     random. Done (`net/WifiCheck`): a link over the network settles it; otherwise, on request, the
+     device sends the one multicast DNS question every phone asks ("which services are there?",
+     naming nothing) and listens 6 s for any device on its subnet but the router, comparing only
+     senders' addresses, in memory.
   3. The provider app (AP-8). Gate: a test shows no envelope, message or contact in the provider's
      storage after it carried traffic, and its beacons are those of any phone. (The Air Provider
      switch already needs Wi-Fi Aware, AP-1: `runtime/AirProvider` checks the system feature, and
@@ -706,8 +709,8 @@ through providers was dropped on 2026-10-13: senders keep their messages, M-8.) 
   of the contact link handshake, pairing, group keys and mesh envelopes
   (`rust/airchat-protocol/formal/`) and hours of fuzzing of every target are done; an independent
   audit remains.
-- **Air Provider app** (AP-8 to AP-10): spare phones with Wi-Fi Aware as always-on providers, with
-  no registry (§7, provider devices).
+- **Air Provider app** (AP-8, AP-9): spare phones with Wi-Fi Aware as always-on providers, with
+  no registry (§7, provider devices). The Wi-Fi check before it (AP-10) is done.
 - **Wi-Fi Aware end to end:** needs a second phone that has it.
 - **Releases:** reproducible builds, a store or other way to distribute beyond GitHub releases.
 - **iOS and Linux (P-2):** platform code over the same Rust core.

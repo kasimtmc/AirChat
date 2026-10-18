@@ -175,6 +175,15 @@
     <string name="air_provider_warning">Telefonun başkalarının aramalarını, görüntülerini ve dosyalarını şifreli olarak Wi-Fi ile taşıyacak. Bu pil harcar: %50 üstünde her şeyi, %20\'den itibaren yalnızca aramaları taşır; %20 altında ya da telefon ısınınca kendiliğinden kapanır. Üstlendiği arama ve dosyaları sonuna kadar taşır. Ulaşılamayan kişiler için hiçbir şey saklamaz.</string>
     <string name="air_provider_turn_on">Aç</string>
     <string name="air_provider_unsupported">Bu telefonda Wi-Fi Aware yok. Air Provider olmak için gerekli: diğerleri seni Wi-Fi\'nin ulaştığı her yerden bulabilsin diye. Başkalarının Air Provider\'larını yine kullanabilirsin.</string>
+    <string name="wifi_check">Bu Wi-Fi\'yi denetle</string>
+    <string name="wifi_check_running">Ağ birkaç saniye dinleniyor…</string>
+    <string name="wifi_check_no_wifi">Bir Wi-Fi ağına bağlı değilsin.</string>
+    <string name="wifi_check_works">AirChat bu Wi-Fi\'de çalışıyor: bu telefon şu anda bu ağ üzerinden başka bir AirChat cihazına bağlı.</string>
+    <string name="wifi_check_heard">Bu Wi-Fi\'de başka cihazlar duyuluyor; AirChat cihazları da büyük olasılıkla birbirini bulur. Biri bu ağ üzerinden bağlandığında kesinleşir.</string>
+    <string name="wifi_check_none">Bu Wi-Fi\'de başka cihaz duyulmuyor. Ya ağda başka kimse yok ya da ağ, birçok kafe ve otel ağı gibi, cihazları birbirinden ayırıyor. AirChat o zaman yakındaki cihazları ağ olmadan, doğrudan bağlar.</string>
+    <string name="wifi_check_private">Ağ hakkında hiçbir şey kaydedilmez ya da gönderilmez.</string>
+    <string name="wifi_guide_title">Modem seninse</string>
+    <string name="wifi_guide">Kendi ağından ayrı bir misafir ağı aç ve onda istemci yalıtımını (AP ya da misafir yalıtımı da denir) kapat, çok noktaya yayını (multicast) açık bırak. Kendi cihazlarını kendi ağında tut: misafirler birbirine ulaşır, senin cihazlarına asla. Ağa AirChat\'i çağrıştıran bir ad verme: ağ adlarını çevredeki herkes görür.</string>
     <string name="air_provider_stopped">Air Provider kapandı: pil azaldı ya da telefon ısındı.</string>
     <string name="channel_status">Durum</string>
     <string name="call_via_provider">Menzil dışında: Air Provider üzerinden bağlanılıyor. Bağlanınca arama başlar.</string>

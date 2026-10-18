@@ -33,6 +33,7 @@ import com.plyg.airchat.net.NetEvent
 import com.plyg.airchat.net.Peer
 import com.plyg.airchat.net.Transport
 import com.plyg.airchat.net.TransportKind
+import com.plyg.airchat.net.WifiCheck
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -588,6 +589,9 @@ class AirChatRuntime(private val app: Application) {
     }
 
     /** Neighbours that carry [pathClass] for others now. */
+    /** The Wi-Fi check (requirements AP-10): whether devices on this Wi-Fi reach each other. */
+    suspend fun checkWifi(): WifiCheck.Result = WifiCheck(app).run(linkedOverWifi = hub?.carries(TransportKind.LAN) == true)
+
     fun providers(pathClass: PathClass): Int = account?.providers(pathClass)?.toInt() ?: 0
 
     /** Whether the link to a contact may carry video: Wi-Fi, or a path that carries it. */

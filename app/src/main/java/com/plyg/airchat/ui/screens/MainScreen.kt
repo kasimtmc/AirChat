@@ -12,18 +12,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,6 +51,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,6 +81,7 @@ import com.plyg.airchat.core.PreviewStatus
 import com.plyg.airchat.core.coreVersion
 import com.plyg.airchat.core.protocolVersion
 import com.plyg.airchat.net.TransportKind
+import com.plyg.airchat.net.WifiCheck
 import com.plyg.airchat.ui.HomeTab
 import com.plyg.airchat.ui.Screen
 import com.plyg.airchat.ui.UiState
@@ -104,6 +110,7 @@ fun MainScreen(
     onReceiveWhileLockedChange: (Boolean) -> Unit,
     onAcceptRequestsChange: (Boolean) -> Unit,
     onAirProviderChange: (Boolean) -> Unit,
+    onCheckWifi: suspend () -> WifiCheck.Result,
     onTransportChange: (TransportKind, Boolean) -> Unit,
     onDirectContactLinksChange: (Boolean) -> Unit,
     /** The walkie-talkie tab, as its own screen draws it. */
@@ -130,7 +137,7 @@ fun MainScreen(
                 HomeTab.WALKIE -> walkie()
                 HomeTab.SETTINGS -> SettingsTab(
                     state, home, onLock, onOpenChat, onBiometricChange, onReceiveWhileLockedChange,
-                    onAcceptRequestsChange, onAirProviderChange, onTransportChange, onDirectContactLinksChange,
+                    onAcceptRequestsChange, onAirProviderChange, onCheckWifi, onTransportChange, onDirectContactLinksChange,
                 )
             }
         }
@@ -587,10 +594,12 @@ private fun SettingsTab(
     onReceiveWhileLockedChange: (Boolean) -> Unit,
     onAcceptRequestsChange: (Boolean) -> Unit,
     onAirProviderChange: (Boolean) -> Unit,
+    onCheckWifi: suspend () -> WifiCheck.Result,
     onTransportChange: (TransportKind, Boolean) -> Unit,
     onDirectContactLinksChange: (Boolean) -> Unit,
 ) {
     var confirmAirProvider by remember { mutableStateOf(false) }
+    var checkingWifi by remember { mutableStateOf(false) }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -696,6 +705,7 @@ private fun SettingsTab(
                 }
                 InfoRow(listOfNotNull(mesh, providers).joinToString("\n"))
             }
+            item { ActionRow(stringResource(R.string.wifi_check), R.drawable.ic_wifi) { checkingWifi = true } }
 
             val blocked = state.contacts.filter { it.state == ContactState.BLOCKED }
             if (blocked.isNotEmpty()) {
@@ -748,6 +758,45 @@ private fun SettingsTab(
             dismissButton = { TextButton(onClick = { confirmAirProvider = false }) { Text(stringResource(R.string.cancel)) } },
         )
     }
+    if (checkingWifi) WifiCheckDialog(onCheckWifi, onDismiss = { checkingWifi = false })
+}
+
+/** The Wi-Fi check (requirements AP-10), and what a router's owner can do about its answer. */
+@Composable
+private fun WifiCheckDialog(check: suspend () -> WifiCheck.Result, onDismiss: () -> Unit) {
+    var result by remember { mutableStateOf<WifiCheck.Result?>(null) }
+    LaunchedEffect(Unit) { result = check() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.wifi_check)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                when (result) {
+                    null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(stringResource(R.string.wifi_check_running))
+                    }
+                    WifiCheck.Result.NO_WIFI -> Text(stringResource(R.string.wifi_check_no_wifi))
+                    WifiCheck.Result.WORKS -> Text(stringResource(R.string.wifi_check_works))
+                    WifiCheck.Result.DEVICES_HEARD -> Text(stringResource(R.string.wifi_check_heard))
+                    WifiCheck.Result.NONE_HEARD -> {
+                        Text(stringResource(R.string.wifi_check_none))
+                        Spacer(Modifier.height(12.dp))
+                        Text(stringResource(R.string.wifi_guide_title), style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(R.string.wifi_guide))
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.wifi_check_private),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
+    )
 }
 
 @Composable
