@@ -1,6 +1,6 @@
 # AirChat — Architecture
 
-Status: **v0.2** (2026-10-15), describing the Android app as built. Requirements referenced as `S-2`, `T-1`, … are in
+Status: **v0.2** (2026-10-18), describing the Android app as built. Requirements referenced as `S-2`, `T-1`, … are in
 [requirements.md](requirements.md).
 
 ## 1. Layers
@@ -48,6 +48,11 @@ AirChat/
 
 iOS and Linux apps will get their own top-level directories and reuse `rust/` unchanged.
 
+`rust/airchat-protocol` is also published on its own as `kasimtmc/airchat-protocol` (MIT or
+Apache-2.0, its specification CC BY 4.0), so that other apps can speak the protocol. That
+repository is a copy with a history of its own, not a submodule: a change to the protocol is made
+here and carried there in the same form.
+
 ## 3. Rust core
 
 ### 3.1 Why a shared core
@@ -93,7 +98,7 @@ libFuzzer, guided by coverage, on the pinned toolchain.
 Dependencies are checked by `cargo deny check` against `rust/deny.toml` (RustSec advisories,
 licences compatible with GPL-3.0-or-later, crates.io only). GitHub Actions
 (`.github/workflows/ci.yml`) runs formatting, clippy, the tests, the vector scripts, cargo-deny and
-the Android build and lint on every push to main and every pull request. What AirChat protects
+the Android build and lint on every push to master and every pull request. What AirChat protects
 against, and what not, is in [threat-model.md](threat-model.md).
 
 ### 3.4 FFI
@@ -673,12 +678,15 @@ Aware and local-only hotspot links; 1:1 and group chat with files; voice and vid
 groups; push-to-talk and walkie-talkie channels; the mesh and Air Provider paths. (Store-and-forward
 through providers was dropped on 2026-10-13: senders keep their messages, M-8.) Next:
 
-- **Assurance before a stable release (S-11):** the threat model, dependency checks and a formal
-  models of the contact link handshake and of pairing (`rust/airchat-protocol/formal/`) are done;
-  models of group keys and the mesh, longer fuzzing of the node targets, and an independent audit
+- **Assurance before a stable release (S-11):** the threat model, dependency checks, formal models
+  of the contact link handshake and of pairing (`rust/airchat-protocol/formal/`) and hours of
+  fuzzing of every target are done; models of group keys and the mesh, and an independent audit
   remain.
+- **Groups changed by two admins at once:** both start the same epoch and devices keep whichever
+  came first; a rule for picking one, and for keeping the other admin's change, is still to come
+  (threat model, weakness 15).
 - **Wi-Fi Aware end to end:** needs a second phone that has it.
-- **Releases:** reproducible builds, a way to distribute.
+- **Releases:** reproducible builds, a store or other way to distribute beyond GitHub releases.
 - **iOS and Linux (P-2):** platform code over the same Rust core.
 
 ### Testing

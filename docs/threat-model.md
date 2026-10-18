@@ -1,6 +1,6 @@
 # AirChat — Threat model
 
-Status: **draft v0.2** (2026-10-15), written to prepare an independent audit (requirement S-11).
+Status: **draft v0.2** (2026-10-18), written to prepare an independent audit (requirement S-11).
 It says what AirChat protects, from whom, on what it relies, and where it knowingly falls short.
 Details are in [protocol.md](../rust/airchat-protocol/docs/protocol.md) (`§`), [requirements.md](requirements.md) (`S-2`, `AP-4`, …)
 and [architecture.md](architecture.md) (`arch §`). Where this document and those disagree, they win
@@ -198,8 +198,8 @@ small set of dependencies, a pinned toolchain and locked versions, and by `cargo
 (`rust/deny.toml`): RustSec advisories, licences compatible with GPL-3.0-or-later, and crates.io as
 the only source. Android dependencies were checked against OSV by hand (2026-10-14: none affected).
 GitHub Actions (`.github/workflows/ci.yml`, its actions pinned to commit SHAs) runs these checks,
-the tests and the Android build on every push to main and every pull request. Not yet: reproducible
-builds, a release signing process.
+the tests and the Android build on every push to master and every pull request. Not yet:
+reproducible builds.
 
 ### A12. A contact running a modified build
 
@@ -256,8 +256,8 @@ Listed for the audit; some are deliberate trade-offs, some may change.
    (arch §6).
 9. While locked, undelivered messages and the keys links need stay in memory (arch §4.3).
 10. Debug builds carry switches and log more; only release builds are meant for use (arch §5).
-11. Builds are not reproducible yet; a release key exists (2026-10-14), but no signing or
-    distribution process yet.
+11. Builds are not reproducible yet. Release APKs are signed by Gradle with the developer's key
+    (v3) and published as GitHub releases with their SHA-256; there is no store or other channel.
 12. Only the contact link handshake (secrecy, forward secrecy, key compromise impersonation,
     mutual authentication, healing) and pairing in its three modes (link secret, peer
     authentication, presence keys) are modelled formally, in Tamarin

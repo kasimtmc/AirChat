@@ -128,7 +128,8 @@ allows permissive licences only: run `cargo deny check` in `rust/airchat-protoco
 ## What comes next
 
 - An independent security audit, after formal models of the remaining handshakes (the contact
-  link handshake and pairing are modelled) and longer fuzzing.
+  link handshake and pairing are modelled).
+- A rule for a group that two admins change at the same time (threat model, weakness 15).
 - Reproducible builds.
 - Wi-Fi Aware tested end to end between two phones that have it.
 - iOS and Linux apps, sharing the same Rust core.

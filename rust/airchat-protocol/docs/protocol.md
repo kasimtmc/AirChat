@@ -1,6 +1,6 @@
 # AirChat Protocol Specification
 
-Status: **complete, not yet stable** (2026-10-14). Every section is specified, implemented by
+Status: **complete, not yet stable** (2026-10-18). Every section is specified, implemented by
 the reference implementation in this repository (`src/`) and pinned by test vectors
 (`tests/vectors/`) that independent scripts re-derive from this text. It has not been audited, and
 formats may still change until version 1.0 of this document; a change updates the spec, the code
