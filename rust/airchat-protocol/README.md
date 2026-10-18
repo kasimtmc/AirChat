@@ -12,10 +12,12 @@ This repository holds everything needed to build an interoperable implementation
 | [`tests/vectors/`](tests/vectors/) | Test vectors for every part (JSON), and `check_*.py` scripts that re-derive them from the specification alone. |
 | [`src/`](src/) | The reference implementation in Rust (`airchat-protocol`): formats and cryptography, no storage, no transports, no platform code, `#![forbid(unsafe_code)]`. |
 | [`fuzz/`](fuzz/) | libFuzzer targets for every parser of bytes that come from another device. |
-| [`formal/`](formal/) | Tamarin models: the contact link handshake (secrecy, forward secrecy, mutual authentication, healing) and pairing in its three modes. |
+| [`formal/`](formal/) | Tamarin models: the contact link handshake (secrecy, forward secrecy, mutual authentication, healing), pairing in its three modes, group keys and 1:1 mesh envelopes. |
 
 It is the protocol of the [AirChat](https://github.com/kasimtmc/AirChat) Android app, which uses
-this crate unchanged.
+this crate unchanged. For an independent review, AirChat's
+[docs/audit.md](https://github.com/kasimtmc/AirChat/blob/master/docs/audit.md) says what to look
+at in both repositories and what has been done.
 
 **Status: version 0, not yet stable and not audited.** Every section is specified, implemented and
 pinned by test vectors, but formats may change until version 1.0 of the specification, and no one

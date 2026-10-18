@@ -1,0 +1,187 @@
+theory AirChatMesh
+begin
+
+/*
+ * 1:1 mesh envelopes (docs/protocol.md §10.3) and one-time prekeys (§10.7), in the symbolic
+ * (Dolev-Yao) model. Every relay is the adversary's: it sees, drops, replays and makes envelopes,
+ * and it may learn any device's static key, any pairing secret, and any prekey while the device
+ * still holds it.
+ *
+ * Abstractions, beyond those of link.spthy (ideal KEM, KDFs and AEAD):
+ * - Pairing (§4) gave the two contacts a fresh pairing secret `psk` and each other's static key,
+ *   out of band (pairing.spthy shows it).
+ * - Prekeys are handed over a link session (§6), modelled as a secure channel: the sender learns
+ *   the recipient's prekey and its id, nobody else learns its private half.
+ * - Opening an envelope with a prekey deletes the prekey's private half: the fact that holds it is
+ *   used up. Revealing it is possible only while it is held.
+ * - The header fields the seal key binds (id, tag, expiry, drop) are values the sender picks;
+ *   tags, drops, hop counts and passing on are left out: they carry no secret.
+ * - The padded payload is the plaintext; resends, acknowledgements and withdrawals are left out.
+ */
+
+builtins: hashing
+
+functions: kempk/1, kemenc/2, kemdec/2,
+           sealkey/3,
+           aead/4, adec/4
+
+equations: kemdec(kemenc(ss, kempk(sk)), sk) = ss,
+           adec(k, n, ad, aead(k, n, ad, p)) = p
+
+restriction one_device_each:
+  "All A #i #j. Device(A) @ i & Device(A) @ j ==> #i = #j"
+
+restriction not_with_oneself:
+  "All a b #i. Neq(a, b) @ i ==> not (a = b)"
+
+// A device takes each envelope once, by id (§10.4).
+restriction envelope_taken_once:
+  "All B id #i #j. Taken(B, id) @ i & Taken(B, id) @ j ==> #i = #j"
+
+rule Device:
+    [ Fr(~sk) ]
+  --[ Device($A), StaticKey($A, ~sk) ]->
+    [ !Static($A, ~sk), !Pk($A, kempk(~sk)), Out(kempk(~sk)) ]
+
+rule Pair:
+    [ Fr(~psk), !Pk($A, pkA), !Pk($B, pkB) ]
+  --[ Neq($A, $B) ]->
+    [ !Psk($A, $B, ~psk), !Psk($B, $A, ~psk) ]
+
+// B hands A a prekey over their link.
+rule Hand_out_prekey:
+    [ Fr(~id), Fr(~pre), !Psk($B, $A, psk) ]
+  --[ PrekeyMade($B, ~id, ~pre) ]->
+    [ HeldPrekey($B, $A, ~id, ~pre), TheirPrekey($A, $B, ~id, kempk(~pre)) ]
+
+rule Reveal_static_key:
+    [ !Static(A, sk) ]
+  --[ RevStatic(A) ]->
+    [ Out(sk) ]
+
+rule Reveal_pairing_secret:
+    [ !Psk(A, B, psk) ]
+  --[ RevPsk(psk) ]->
+    [ Out(psk) ]
+
+// Someone copies a prekey from B's device while B still holds it; B still has it too (once copied,
+// copying again adds nothing, and a fact that went round would make every proof go round).
+rule Reveal_prekey:
+    [ HeldPrekey(B, A, id, pre) ]
+  --[ RevPrekey(B, id) ]->
+    [ CopiedPrekey(B, A, id, pre), Out(pre) ]
+
+/* A seals a text for B: to a prekey of B's, or with none left to B's static key. */
+
+rule Seal_to_prekey:
+  let header = <~eid, ~tag, $expires, ~drop>
+      ct     = kemenc(~ss, pkPre)
+      key    = sealkey(psk, ~ss, <'AirChat v1 mesh-seal', $A, $B, header, id>)
+      body   = <id, ct, aead(key, '0', 'none', ~text)>
+  in
+    [ TheirPrekey($A, $B, id, pkPre), !Psk($A, $B, psk), Fr(~eid), Fr(~tag), Fr(~drop), Fr(~ss), Fr(~text) ]
+  --[ Encap(~ss, pkPre), Sent($A, $B, header, ~text), SentToPrekey($A, $B, id, ~text, psk) ]->
+    [ Out(<header, body>) ]
+
+rule Seal_to_static_key:
+  let header = <~eid, ~tag, $expires, ~drop>
+      ct     = kemenc(~ss, pkB)
+      key    = sealkey(psk, ~ss, <'AirChat v1 mesh-seal', $A, $B, header, 'static'>)
+      body   = <'static', ct, aead(key, '0', 'none', ~text)>
+  in
+    [ !Pk($B, pkB), !Psk($A, $B, psk), Fr(~eid), Fr(~tag), Fr(~drop), Fr(~ss), Fr(~text) ]
+  --[ Encap(~ss, pkB), Sent($A, $B, header, ~text), SentToStatic($A, $B, ~text, psk) ]->
+    [ Out(<header, body>) ]
+
+/* B opens it: with the prekey it names, which then goes, or with its static key. */
+
+rule Open_with_prekey:
+  let header = <eid, tag, expires, drop>
+      key    = sealkey(psk, ss, <'AirChat v1 mesh-seal', $A, $B, header, id>)
+  in
+    [ HeldPrekey($B, $A, id, pre), !Psk($B, $A, psk),
+      In(<header, <id, kemenc(ss, kempk(pre)), aead(key, '0', 'none', text)>>) ]
+  --[ Taken($B, eid), Received($B, $A, header, text, psk), OpenedWithPrekey($B, id) ]->
+    [ ]
+
+rule Open_with_copied_prekey:
+  let header = <eid, tag, expires, drop>
+      key    = sealkey(psk, ss, <'AirChat v1 mesh-seal', $A, $B, header, id>)
+  in
+    [ CopiedPrekey($B, $A, id, pre), !Psk($B, $A, psk),
+      In(<header, <id, kemenc(ss, kempk(pre)), aead(key, '0', 'none', text)>>) ]
+  --[ Taken($B, eid), Received($B, $A, header, text, psk), OpenedWithPrekey($B, id) ]->
+    [ ]
+
+rule Open_with_static_key:
+  let header = <eid, tag, expires, drop>
+      key    = sealkey(psk, ss, <'AirChat v1 mesh-seal', $A, $B, header, 'static'>)
+  in
+    [ !Static($B, sk), !Psk($B, $A, psk),
+      In(<header, <'static', kemenc(ss, kempk(sk)), aead(key, '0', 'none', text)>>) ]
+  --[ Taken($B, eid), Received($B, $A, header, text, psk) ]->
+    [ ]
+
+/* Helpers, proved first and then used. */
+
+lemma static_keys_secret [reuse]:
+  "All A sk #i #k. StaticKey(A, sk) @ i & K(sk) @ k ==> Ex #r. RevStatic(A) @ r & r < k"
+
+lemma prekeys_secret [reuse]:
+  "All B id pre #i #k. PrekeyMade(B, id, pre) @ i & K(pre) @ k ==> Ex #r. RevPrekey(B, id) @ r & r < k"
+
+lemma encapsulated_secrets [reuse]:
+  "All ss pk #i #k. Encap(ss, pk) @ i & K(ss) @ k ==>
+     (Ex A sk #j #r. StaticKey(A, sk) @ j & pk = kempk(sk) & RevStatic(A) @ r & r < k)
+     | (Ex B id pre #j #r. PrekeyMade(B, id, pre) @ j & pk = kempk(pre) & RevPrekey(B, id) @ r & r < k)"
+
+/* Sanity. */
+
+lemma executable_prekey:
+  exists-trace
+  "Ex A B h t id psk #i #j #o. SentToPrekey(A, B, id, t, psk) @ i & Received(B, A, h, t, psk) @ j & OpenedWithPrekey(B, id) @ o
+     & not (Ex X #r. RevStatic(X) @ r) & not (Ex p #r. RevPsk(p) @ r)"
+
+lemma executable_static:
+  exists-trace
+  "Ex A B h t psk #i #j. SentToStatic(A, B, t, psk) @ i & Received(B, A, h, t, psk) @ j
+     & not (Ex X #r. RevStatic(X) @ r) & not (Ex p #r. RevPsk(p) @ r)"
+
+/*
+ * Relays cannot read: a text sealed to a prekey is read only by whoever has both the pairing secret
+ * and that prekey, copied while the recipient held it; one sealed to the static key, by whoever
+ * has the pairing secret and the static key.
+ */
+
+lemma prekey_text_secret:
+  "All A B id t psk #i #k. SentToPrekey(A, B, id, t, psk) @ i & K(t) @ k ==>
+     (Ex #r. RevPsk(psk) @ r) & (Ex #r. RevPrekey(B, id) @ r)"
+
+lemma static_text_secret:
+  "All A B t psk #i #k. SentToStatic(A, B, t, psk) @ i & K(t) @ k ==>
+     (Ex #r. RevPsk(psk) @ r) & (Ex #r. RevStatic(B) @ r)"
+
+/*
+ * Forward secrecy of prekey texts (§10.6): once B opened the envelope, its prekey is gone, so a
+ * text it opened stays secret unless the prekey was copied before that; taking the device later,
+ * with its static key, every other prekey and the pairing secret, opens nothing.
+ */
+
+lemma prekey_text_forward_secret:
+  "All A B id t h psk #i #j #o #k. SentToPrekey(A, B, id, t, psk) @ i & Received(B, A, h, t, psk) @ j
+     & OpenedWithPrekey(B, id) @ o & K(t) @ k ==>
+     Ex #r. RevPrekey(B, id) @ r & r < o"
+
+/*
+ * Authenticity and the header (§10.3): what B takes as from A, A sent, with the same id, tag,
+ * expiry and drop, unless their pairing secret leaked (which is all a forger needs: spec §10.6).
+ */
+
+lemma envelopes_authentic:
+  "All A B h t psk #j. Received(B, A, h, t, psk) @ j ==>
+     (Ex #i. Sent(A, B, h, t) @ i & i < j) | (Ex #r. RevPsk(psk) @ r & r < j)"
+
+lemma envelopes_taken_once:
+  "All A B h t psk #j #l. Received(B, A, h, t, psk) @ j & Received(B, A, h, t, psk) @ l ==> #j = #l"
+
+end

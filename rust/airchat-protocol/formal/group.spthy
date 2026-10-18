@@ -1,0 +1,256 @@
+theory AirChatGroup
+begin
+
+/*
+ * Group keys (docs/protocol.md §9.1 to §9.3), in the symbolic (Dolev-Yao) model: an admin makes a
+ * group of three (epoch 0) and then removes one member (epoch 1); members send messages in either
+ * epoch. The network is the adversary's; it may learn any device's static key and identity key at
+ * any time, which makes that device the adversary's too: a member it controls may keep every key
+ * it was given and write with them.
+ *
+ * Abstractions, beyond those of link.spthy (ideal KEM, KDFs and AEAD) and pairing.spthy (ideal
+ * signatures):
+ * - One shape of group: an admin A and members B and C in epoch 0, A and B in epoch 1 (C removed).
+ *   Rosters are tuples of device names in roster order, the admin first; a device's name stands
+ *   for its identity key, which pairing bound to it (pairing.spthy).
+ * - The admin knows each member's static key and each member the admin's identity key, out of band
+ *   (pairing). Fellow members' identity keys come from the roster.
+ * - Envelopes, the sealed roster and the signature are as in §9.2; group messages as in §9.3, with
+ *   sent_at left out (it is the sender's claim, nothing rests on it).
+ * - Two updates of one epoch (§9.2) are not modelled: the tests cover that rule.
+ */
+
+builtins: hashing, signing
+
+functions: kempk/1, kemenc/2, kemdec/2,
+           envkey/4, rosterkey/3, msgkey/3,
+           aead/4, adec/4
+
+equations: kemdec(kemenc(ss, kempk(sk)), sk) = ss,
+           adec(k, n, ad, aead(k, n, ad, p)) = p
+
+restriction equal:
+  "All x y #i. Eq(x, y) @ i ==> x = y"
+
+restriction one_device_each:
+  "All A #i #j. Device(A) @ i & Device(A) @ j ==> #i = #j"
+
+restriction three_devices:
+  "All a b c #i. Distinct(a, b, c) @ i ==> not (a = b) & not (b = c) & not (a = c)"
+
+// A device takes each epoch of a group once: only one newer than the epoch it holds (§9.2).
+restriction each_epoch_taken_once:
+  "All M g e r r2 k k2 A A2 #i #j. Accepted(M, g, e, r, k, A) @ i & Accepted(M, g, e, r2, k2, A2) @ j ==> #i = #j"
+
+rule Device:
+    [ Fr(~ltk), Fr(~sk) ]
+  --[ Device($A), IdentityKey($A, ~ltk), StaticKey($A, ~sk) ]->
+    [ !Ltk($A, ~ltk), !Id($A, pk(~ltk)), !Static($A, ~sk), !Pk($A, kempk(~sk)),
+      Out(pk(~ltk)), Out(kempk(~sk)) ]
+
+rule Reveal_static_key:
+    [ !Static(A, sk) ]
+  --[ RevStatic(A) ]->
+    [ Out(sk) ]
+
+rule Reveal_identity_key:
+    [ !Ltk(A, ltk) ]
+  --[ RevId(A) ]->
+    [ Out(ltk) ]
+
+/* The admin A makes the group: epoch 0 with A, B and C. */
+
+rule Create_group:
+  let r0    = <~g, '0', $A, $B, $C>
+      envA  = <$A, kemenc(~sa, pkA), aead(envkey(~sa, ~g, '0', $A), '0', <~g, '0'>, ~k)>
+      envB  = <$B, kemenc(~sb, pkB), aead(envkey(~sb, ~g, '0', $B), '0', <~g, '0'>, ~k)>
+      envC  = <$C, kemenc(~sc, pkC), aead(envkey(~sc, ~g, '0', $C), '0', <~g, '0'>, ~k)>
+      body  = <~g, '0', pk(ltkA), envA, envB, envC, ~n, aead(rosterkey(~k, ~g, '0'), ~n, <~g, '0'>, r0)>
+  in
+    [ !Ltk($A, ltkA), !Pk($A, pkA), !Pk($B, pkB), !Pk($C, pkC),
+      Fr(~g), Fr(~k), Fr(~sa), Fr(~sb), Fr(~sc), Fr(~n) ]
+  --[ Distinct($A, $B, $C), Encap(~sa, pkA), Encap(~sb, pkB), Encap(~sc, pkC),
+      Issued($A, ~g, '0', r0, ~k), EpochKey(~g, '0', ~k),
+      InRoster(~g, '0', $A), InRoster(~g, '0', $B), InRoster(~g, '0', $C) ]->
+    [ Out(<body, sign(<'group-update', body>, ltkA)>), Admin($A, ~g, ~k, $B, $C),
+      Holds($A, ~g, '0', ~k, r0), !HeldKey($A, ~g, '0', ~k),
+      !Knows($A, ~g, '0', $A), !Knows($A, ~g, '0', $B), !Knows($A, ~g, '0', $C) ]
+
+/* The admin removes C: epoch 1 with A and B, sealed to them only. */
+
+rule Remove_member:
+  let r1    = <g, '1', $A, $B>
+      envA  = <$A, kemenc(~sa, pkA), aead(envkey(~sa, g, '1', $A), '0', <g, '1'>, ~k)>
+      envB  = <$B, kemenc(~sb, pkB), aead(envkey(~sb, g, '1', $B), '0', <g, '1'>, ~k)>
+      body  = <g, '1', pk(ltkA), envA, envB, ~n, aead(rosterkey(~k, g, '1'), ~n, <g, '1'>, r1)>
+  in
+    [ Admin($A, g, k0, $B, $C), Holds($A, g, '0', k0, r0), !Ltk($A, ltkA), !Pk($A, pkA), !Pk($B, pkB),
+      Fr(~k), Fr(~sa), Fr(~sb), Fr(~n) ]
+  --[ Encap(~sa, pkA), Encap(~sb, pkB), Issued($A, g, '1', r1, ~k), EpochKey(g, '1', ~k),
+      InRoster(g, '1', $A), InRoster(g, '1', $B), Removed(g, $C), Moved($A, g) ]->
+    [ Out(<body, sign(<'group-update', body>, ltkA)>), !HeldKey($A, g, '1', ~k), !Epoch1($A, g, $A, $B),
+      !Knows($A, g, '1', $A), !Knows($A, g, '1', $B) ]
+
+/*
+ * A member takes epoch 0: the update is signed by A, whom it knows (a contact), it finds and opens
+ * its envelope, and the roster decrypts and names A as admin (first) and itself.
+ */
+
+rule Take_epoch_0_second:
+  let r0   = <g, '0', $A, $M, $X>
+      env  = <$M, kemenc(ss, kempk(skM)), aead(envkey(ss, g, '0', $M), '0', <g, '0'>, k)>
+      body = <g, '0', pk(ltkA), envA, env, envX, n, aead(rosterkey(k, g, '0'), n, <g, '0'>, r0)>
+  in
+    [ !Id($A, pk(ltkA)), !Static($M, skM), In(<body, sign(<'group-update', body>, ltkA)>) ]
+  --[ Accepted($M, g, '0', r0, k, $A) ]->
+    [ Holds($M, g, '0', k, r0), !HeldKey($M, g, '0', k),
+      !Knows($M, g, '0', $A), !Knows($M, g, '0', $M), !Knows($M, g, '0', $X) ]
+
+rule Take_epoch_0_third:
+  let r0   = <g, '0', $A, $X, $M>
+      env  = <$M, kemenc(ss, kempk(skM)), aead(envkey(ss, g, '0', $M), '0', <g, '0'>, k)>
+      body = <g, '0', pk(ltkA), envA, envX, env, n, aead(rosterkey(k, g, '0'), n, <g, '0'>, r0)>
+  in
+    [ !Id($A, pk(ltkA)), !Static($M, skM), In(<body, sign(<'group-update', body>, ltkA)>) ]
+  --[ Accepted($M, g, '0', r0, k, $A) ]->
+    [ Holds($M, g, '0', k, r0), !HeldKey($M, g, '0', k),
+      !Knows($M, g, '0', $A), !Knows($M, g, '0', $X), !Knows($M, g, '0', $M) ]
+
+/*
+ * B takes epoch 1: newer than the one it holds, signed by the admin of the roster it holds, with
+ * its own envelope. It keeps epoch 0 as its previous one, to read messages that arrive late.
+ */
+
+rule Take_epoch_1:
+  let r0   = <g, '0', $A, $M, $X>
+      r1   = <g, '1', $A, $M>
+      env  = <$M, kemenc(ss, kempk(skM)), aead(envkey(ss, g, '1', $M), '0', <g, '1'>, k1)>
+      body = <g, '1', pk(ltkA), envA, env, n, aead(rosterkey(k1, g, '1'), n, <g, '1'>, r1)>
+  in
+    [ Holds($M, g, '0', k0, r0), !Id($A, pk(ltkA)), !Static($M, skM), In(<body, sign(<'group-update', body>, ltkA)>) ]
+  --[ Accepted($M, g, '1', r1, k1, $A), Moved($M, g) ]->
+    [ !HeldKey($M, g, '1', k1), !Epoch1($M, g, $A, $M), !Knows($M, g, '1', $A), !Knows($M, g, '1', $M) ]
+
+/*
+ * Group messages (§9.3). A device that holds an epoch's key may write in it at any time, also after
+ * it moved on or was removed (a modified client keeps its keys); honest devices write only in their
+ * current epoch, so this gives the adversary more, not less.
+ */
+
+rule Write:
+  let body = <g, e, ~mid, pk(ltkX), ~n, aead(msgkey(k, g, e), ~n, <g, e, ~mid, pk(ltkX)>, ~text)>
+  in
+    [ !HeldKey($X, g, e, k), !Ltk($X, ltkX), Fr(~mid), Fr(~n), Fr(~text) ]
+  --[ Wrote($X, g, e, k, ~text) ]->
+    [ Out(<body, sign(<'group-message', body>, ltkX)>) ]
+
+/*
+ * Reading. A message of the epoch held, from a member of it (as the roster it took says: Knows):
+ * of epoch 0 only until the device moved to epoch 1 (restriction below). After that, a message of
+ * epoch 0 only from someone in the current roster too (§9.3): in this shape, from A and B.
+ */
+
+rule Read_current_epoch:
+  let body = <g, e, mid, pk(ltkX), n, aead(msgkey(k, g, e), n, <g, e, mid, pk(ltkX)>, text)>
+  in
+    [ !HeldKey($M, g, e, k)[-], !Knows($M, g, e, $X)[-], !Id($X, pk(ltkX)),
+      In(<body, sign(<'group-message', body>, ltkX)>) ]
+  --[ ReadAsCurrent($M, g, e), Read($M, g, e, $X, text) ]->
+    [ ]
+
+restriction epoch_0_is_current_until_epoch_1:
+  "All M g #i #j. ReadAsCurrent(M, g, '0') @ i & Moved(M, g) @ j ==> #i < #j"
+
+// The roster of epoch 1 is the admin and one member: the sender is one of the two.
+rule Read_previous_epoch_from_the_admin:
+  let body = <g, '0', mid, pk(ltkX), n, aead(msgkey(k0, g, '0'), n, <g, '0', mid, pk(ltkX)>, text)>
+  in
+    [ !Epoch1($M, g, $X, $Y), !Knows($M, g, '0', $X)[-], !HeldKey($M, g, '0', k0)[-],
+      !Id($X, pk(ltkX)), In(<body, sign(<'group-message', body>, ltkX)>) ]
+  --[ Read($M, g, '0', $X, text), ReadLate($M, g, $X) ]->
+    [ ]
+
+rule Read_previous_epoch_from_the_member:
+  let body = <g, '0', mid, pk(ltkX), n, aead(msgkey(k0, g, '0'), n, <g, '0', mid, pk(ltkX)>, text)>
+  in
+    [ !Epoch1($M, g, $Y, $X), !Knows($M, g, '0', $X)[-], !HeldKey($M, g, '0', k0)[-],
+      !Id($X, pk(ltkX)), In(<body, sign(<'group-message', body>, ltkX)>) ]
+  --[ Read($M, g, '0', $X, text), ReadLate($M, g, $X) ]->
+    [ ]
+
+/* Helpers, proved first and then used. */
+
+lemma static_keys_secret [reuse]:
+  "All A sk #i #k. StaticKey(A, sk) @ i & K(sk) @ k ==> Ex #r. RevStatic(A) @ r & r < k"
+
+lemma identity_keys_secret [reuse]:
+  "All A ltk #i #k. IdentityKey(A, ltk) @ i & K(ltk) @ k ==> Ex #r. RevId(A) @ r & r < k"
+
+lemma encapsulated_secrets [reuse]:
+  "All ss pk #i #k. Encap(ss, pk) @ i & K(ss) @ k ==>
+     Ex A sk #j #r. StaticKey(A, sk) @ j & pk = kempk(sk) & RevStatic(A) @ r & r < k"
+
+/*
+ * An epoch's key is the adversary's only if a member of that epoch is: in particular the member
+ * removed, whatever it holds, never learns the key of the epoch after (§9.2, M-4).
+ */
+
+lemma epoch_0_key_secret [reuse]:
+  "All g k #i #k. EpochKey(g, '0', k) @ i & K(k) @ k ==>
+     Ex X #j #r. InRoster(g, '0', X) @ j & RevStatic(X) @ r"
+
+lemma epoch_1_key_secret [reuse]:
+  "All g k #i #k. EpochKey(g, '1', k) @ i & K(k) @ k ==>
+     Ex X #j #r. InRoster(g, '1', X) @ j & RevStatic(X) @ r"
+
+lemma removed_member_gets_nothing_new:
+  "All g C k #i #j #k. Removed(g, C) @ i & EpochKey(g, '1', k) @ j & K(k) @ k ==>
+     Ex X #l #r. InRoster(g, '1', X) @ l & RevStatic(X) @ r & not (X = C)"
+
+/* Updates are the admin's: a member takes an epoch only as its admin issued it. */
+
+lemma updates_authentic [reuse]:
+  "All M g e r k A #i. Accepted(M, g, e, r, k, A) @ i ==>
+     (Ex #j. Issued(A, g, e, r, k) @ j & j < i) | (Ex #r. RevId(A) @ r & r < i)"
+
+/*
+ * Messages: what a member reads as from X in an epoch, X wrote in that epoch, unless X's identity
+ * key leaked. And a message written under an epoch key the admin issued is read by nobody outside
+ * that epoch, unless one of its members is the adversary's. (A group made up by someone holding
+ * the admin's identity key has keys of its own: its members are told what that someone wants.)
+ */
+
+lemma messages_authentic:
+  "All M g e X t #i. Read(M, g, e, X, t) @ i ==>
+     (Ex k #j. Wrote(X, g, e, k, t) @ j & j < i) | (Ex #r. RevId(X) @ r & r < i)"
+
+lemma messages_secret:
+  "All X g e k t A r #i #j #l. Wrote(X, g, e, k, t) @ i & Issued(A, g, e, r, k) @ j & K(t) @ l ==>
+     Ex Y #m #n. InRoster(g, e, Y) @ m & RevStatic(Y) @ n"
+
+/*
+ * The removed member cannot write into the group (§9.3): once a member holds epoch 1, it reads
+ * epoch 0 messages only from those in epoch 1 too; so nothing more from C, though C keeps epoch 0's
+ * key and its own identity key and writes with them. Unless the adversary holds the admin's
+ * identity key and signs an epoch 1 with C in it.
+ */
+
+lemma removed_member_cannot_write:
+  "All M g X t r1 k1 A #j #l. Accepted(M, g, '1', r1, k1, A) @ j & Read(M, g, '0', X, t) @ l & j < l ==>
+     (Ex #m. InRoster(g, '1', X) @ m) | (Ex #r. RevId(A) @ r)"
+
+
+/* Sanity. */
+
+lemma executable:
+  exists-trace
+  "Ex A B g k0 k1 r0 r1 t #i #j #l. Accepted(B, g, '0', r0, k0, A) @ i & Accepted(B, g, '1', r1, k1, A) @ j
+     & Read(B, g, '1', A, t) @ l
+     & not (Ex X #r. RevStatic(X) @ r) & not (Ex X #r. RevId(X) @ r)"
+
+lemma executable_late:
+  exists-trace
+  "Ex B g A t #l. ReadLate(B, g, A) @ l & Read(B, g, '0', A, t) @ l
+     & not (Ex X #r. RevStatic(X) @ r) & not (Ex X #r. RevId(X) @ r)"
+
+end

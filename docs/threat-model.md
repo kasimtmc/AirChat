@@ -258,12 +258,15 @@ Listed for the audit; some are deliberate trade-offs, some may change.
 10. Debug builds carry switches and log more; only release builds are meant for use (arch §5).
 11. Builds are not reproducible yet. Release APKs are signed by Gradle with the developer's key
     (v3) and published as GitHub releases with their SHA-256; there is no store or other channel.
-12. Only the contact link handshake (secrecy, forward secrecy, key compromise impersonation,
-    mutual authentication, healing) and pairing in its three modes (link secret, peer
-    authentication, presence keys) are modelled formally, in Tamarin
+12. The contact link handshake (secrecy, forward secrecy, key compromise impersonation, mutual
+    authentication, healing), pairing in its three modes (link secret, peer authentication,
+    presence keys), group keys (epoch key secrecy, removal, update and message authenticity, the
+    removed member kept out) and 1:1 mesh envelopes (secrecy from relays, forward secrecy of
+    prekey texts, authenticity) are modelled formally, in Tamarin
     (`rust/airchat-protocol/formal/`), symbolically and with ideal primitives; the emoji are
-    compared as whole hashes. Group, channel and mesh handshakes, envelopes and privacy (identity
-    hiding, unlinkability) are not; test vectors are re-derived
+    compared as whole hashes, and the group model has one shape (three members, one removal).
+    Group, channel and mesh links, paths, two updates of one epoch and privacy (identity hiding,
+    unlinkability) are not; test vectors are re-derived
     from the spec by independent scripts, and every parser of outside bytes is fuzzed (arch §3.3).
 13. Whatever happens on the other side's device is only as good as the app there: voice messages
     deleted after playing (V-3), a temporary member's content deleted at the end (M-5), a group

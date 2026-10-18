@@ -685,9 +685,9 @@ groups; push-to-talk and walkie-talkie channels; the mesh and Air Provider paths
 through providers was dropped on 2026-10-13: senders keep their messages, M-8.) Next:
 
 - **Assurance before a stable release (S-11):** the threat model, dependency checks, formal models
-  of the contact link handshake and of pairing (`rust/airchat-protocol/formal/`) and hours of
-  fuzzing of every target are done; models of group keys and the mesh, and an independent audit
-  remain.
+  of the contact link handshake, pairing, group keys and mesh envelopes
+  (`rust/airchat-protocol/formal/`) and hours of fuzzing of every target are done; an independent
+  audit remains.
 - **Wi-Fi Aware end to end:** needs a second phone that has it.
 - **Releases:** reproducible builds, a store or other way to distribute beyond GitHub releases.
 - **iOS and Linux (P-2):** platform code over the same Rust core.

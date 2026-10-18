@@ -8,6 +8,8 @@ device's long-term keys at any time; a lemma states what it still cannot do.
 |---|---|
 | [`link.spthy`](link.spthy) | Contact link sessions: recognition tags (§6.2), the handshake (§6.3), link keys (§6.8) |
 | [`pairing.spthy`](pairing.spthy) | Pairing (§4.3) in all three modes: QR invites (§4.4), Nearby Pairing with emoji (§4.5), adding by AirChat ID (§4.8); contact cards (§4.6) |
+| [`group.spthy`](group.spthy) | Group keys: updates (§9.2) and messages (§9.3) of a group of three whose admin removes one member |
+| [`mesh.spthy`](mesh.spthy) | 1:1 mesh envelopes (§10.3) and one-time prekeys (§10.7) |
 
 ## Running
 
@@ -18,7 +20,13 @@ tamarin-prover.com). Some Maude packages do not find their own prelude; `MAUDE_L
 cd formal
 MAUDE_LIB=/usr/share/maude tamarin-prover --prove link.spthy
 MAUDE_LIB=/usr/share/maude tamarin-prover --prove pairing.spthy
+MAUDE_LIB=/usr/share/maude tamarin-prover --derivcheck-timeout=0 --prove group.spthy
+MAUDE_LIB=/usr/share/maude tamarin-prover --prove mesh.spthy
 ```
+
+On a system with a Turkish locale, set `LC_ALL=C.UTF-8` (Tamarin reads the models as UTF-8, and
+shell character ranges then behave). `--derivcheck-timeout=0` turns off a sanity check of the
+group model's rules that does not finish in the default five seconds; it proves nothing.
 
 `--prove=<lemma>` proves one lemma; `tamarin-prover interactive .` opens the models in a browser.
 
@@ -77,15 +85,62 @@ the emoji, it finds a man in the middle who learns the link secret (32 steps) an
 another device's card (12 steps). Emoji made without the transcript `h` exhausted 4 GB of memory
 in 20 minutes without a verdict.
 
+## What `group.spthy` shows
+
+All twelve lemmas are verified, in about ten minutes (2026-10-18). The adversary owns the network
+and may reveal any device's static key and identity key at any time, which makes that device its
+own: a member it controls keeps every key it was given and writes with them, also after it was
+removed.
+
+| Lemma | Says |
+|---|---|
+| `epoch_0_key_secret`, `epoch_1_key_secret` | An epoch's key is the adversary's only if a member of that epoch is. |
+| `removed_member_gets_nothing_new` | The member removed never learns the next epoch's key, whatever it holds. |
+| `updates_authentic` | A member takes an epoch only as its admin issued it, unless the admin's identity key leaked. |
+| `messages_authentic` | What a member reads as from X in an epoch, X wrote in that epoch, unless X's identity key leaked. |
+| `messages_secret` | A message written under an epoch key the admin issued is read by nobody outside that epoch, unless one of its members is the adversary's. |
+| `removed_member_cannot_write` | Once a member holds the next epoch, it reads earlier-epoch messages only from those still in the group (§9.3): nothing more from the member removed, though it keeps the old key. Unless the admin's identity key leaked. |
+| `executable`, `executable_late` | Both epochs can be taken and read, and a late message of epoch 0 from someone still in the group is read after epoch 1. |
+| `static_keys_secret`, `identity_keys_secret`, `encapsulated_secrets` | Helpers. |
+
+Not vacuous: when the admin seals epoch 1's key to the member removed too, Tamarin finds the attack
+on `epoch_1_key_secret` (13 steps); when a device reads late messages from anyone in the earlier
+epoch, it finds the removed member writing in (`removed_member_cannot_write`, 58 steps).
+
+## What `mesh.spthy` shows
+
+All ten lemmas are verified, in about nine minutes (2026-10-18). Every relay is the adversary's,
+and it may reveal any static key, any pairing secret, and any prekey while its owner still holds
+it.
+
+| Lemma | Says |
+|---|---|
+| `prekey_text_secret`, `static_text_secret` | Relays cannot read: a text is the adversary's only if it has both the pairing secret and the recipient's key it was sealed to (that prekey, or the static key). |
+| `prekey_text_forward_secret` | Once the recipient opened a text sealed to a prekey, the prekey is gone: taking the device later, with its static key, every other prekey and the pairing secret, opens nothing (§10.6). |
+| `envelopes_authentic` | What the recipient takes as from A, A sent, with the same id, tag, expiry and drop, unless their pairing secret leaked (all a forger needs, as §10.6 says). |
+| `envelopes_taken_once` | No envelope is taken twice. |
+| `executable_prekey`, `executable_static` | Both kinds of envelope go through. |
+| `static_keys_secret`, `prekeys_secret`, `encapsulated_secrets` | Helpers. |
+
+Not vacuous: with the pairing secret left out of the seal key, Tamarin finds the static key alone
+opening a text (`static_text_secret`, 11 steps) and anyone forging an envelope
+(`envelopes_authentic`, 11 steps).
+
 ## What they do not show
 
 The models' headers list their abstractions. In short:
 
 - X-Wing, HKDF, HMAC, SHA-256 and ChaCha20-Poly1305 are ideal. Their computational security is the
   primitives' (libcrux, the X-Wing paper), not this model's.
-- `link.spthy` assumes pairing gave both sides a fresh secret and each other's static key, which
-  `pairing.spthy` shows for itself; the two are not composed in one model. Group links, channel
-  and mesh links, envelopes, static key versions (§6.9) and build attestation are not modelled.
+- `link.spthy`, `group.spthy` and `mesh.spthy` assume pairing gave contacts a fresh secret and
+  each other's keys, which `pairing.spthy` shows for itself; the models are not composed into one.
+  Group links (§9.4), channel and mesh links (§11.3, §10.2), paths (§12), static key versions
+  (§6.9) and build attestation are not modelled.
+- `group.spthy` models one shape of group (three members, one removal) and not two updates of one
+  epoch (§9.2); the tests cover that rule. Its devices may write in any epoch whose key they hold,
+  which gives the adversary more than honest devices do.
+- `mesh.spthy` leaves out tags, drops, hops and passing on, which carry no secret, and group
+  envelopes, which are group messages (`group.spthy`).
 - The emoji are compared as whole hashes. That five emoji (30 bits) suffice, thanks to the
   commitment in message 2, is a matter of probability, outside a symbolic model.
 - Identity hiding and unlinkability (§6.5) are privacy properties, which need observational

@@ -124,11 +124,13 @@ allows permissive licences only: run `cargo deny check` in `rust/airchat-protoco
 - [Protocol](rust/airchat-protocol/docs/protocol.md): the wire protocol, byte by byte; with its
   test vectors and Rust implementation in [rust/airchat-protocol](rust/airchat-protocol/README.md).
 - [Threat model](docs/threat-model.md): what is protected from whom, and the known weaknesses.
+- [Audit brief](docs/audit.md): for an independent review: what to look at, how to run the checks,
+  what has and has not been done.
 
 ## What comes next
 
-- An independent security audit, after formal models of the remaining handshakes (the contact
-  link handshake and pairing are modelled).
+- An independent security audit. The contact link handshake, pairing, group keys and mesh
+  envelopes are modelled formally (`rust/airchat-protocol/formal/`).
 - Reproducible builds.
 - Wi-Fi Aware tested end to end between two phones that have it.
 - iOS and Linux apps, sharing the same Rust core.
