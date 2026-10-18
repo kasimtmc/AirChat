@@ -26,6 +26,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.security.SecureRandom
@@ -135,7 +136,7 @@ class LanTransport(
             }
         }
         scope.launch {
-            for (service in toResolve) resolve(service)?.let(::update)
+            for (service in toResolve) resolve(service)?.takeIf { onLink(it.host) }?.let(::update)
         }
         announcePresence()
         channelChanged()
@@ -366,6 +367,23 @@ class LanTransport(
         })
     }
 
+    /**
+     * Whether [address] is on a network this device is on: link-local, or in the subnet of one of its
+     * interfaces (Wi-Fi, hotspot). Devices on the same Wi-Fi always are. An address elsewhere cannot
+     * be reached, and connecting to it would only time out, again and again: an emulator announces
+     * the address it has behind its NAT, a device on a VPN one of the VPN's.
+     */
+    private fun onLink(address: InetAddress): Boolean {
+        if (address.isLinkLocalAddress) return true
+        val interfaces = runCatching { NetworkInterface.getNetworkInterfaces()?.toList() }.getOrNull().orEmpty()
+        val on = interfaces
+            .filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) }
+            .flatMap { it.interfaceAddresses }
+            .any { it.address.javaClass == address.javaClass && sameSubnet(it.address, address, it.networkPrefixLength.toInt()) }
+        if (!on && BuildConfig.DEBUG) Log.d(TAG, "ignoring a service at an address not on any network of this device")
+        return on
+    }
+
     private fun update(peer: LanPeer) {
         synchronized(found) {
             // A device whose app restarted announces a new service; some phones (seen on MIUI) never
@@ -398,6 +416,19 @@ class LanTransport(
                 bytes[i] = (bytes[i].toInt() and (0xff shl (8 - kept))).toByte()
             }
             return "${bytes.toHex()}/$prefixLength"
+        }
+
+        /** Whether [a] and [b] agree in their first [prefixLength] bits. */
+        fun sameSubnet(a: InetAddress, b: InetAddress, prefixLength: Int): Boolean {
+            val x = a.address
+            val y = b.address
+            if (x.size != y.size || prefixLength !in 0..8 * x.size) return false
+            for (i in x.indices) {
+                val kept = (prefixLength - 8 * i).coerceIn(0, 8)
+                val mask = 0xff shl (8 - kept) and 0xff
+                if (x[i].toInt() and mask != y[i].toInt() and mask) return false
+            }
+            return true
         }
 
         fun String.hexToBytesOrNull(): ByteArray? =
