@@ -273,10 +273,13 @@ Listed for the audit; some are deliberate trade-offs, some may change.
 14. Verified builds trust Google's attestation roots and a revocation list as recent as the build;
     leaked attestation keys pass until revoked and the user updates (§6.10, A12).
 15. Two admins who change a group at the same time, out of each other's reach, both start the
-    same epoch number. A device takes whichever comes first and ignores the other (§9.2), so
-    members can end up on different keys for that epoch, unable to read each other's messages
-    of it, until an admin starts the next; and that admin builds on the roster it holds, which
-    can undo the other admin's change, a removal included. There is no rule yet for picking one.
+    same epoch. The update with the smaller id stands everywhere and the other admin makes its
+    change again in the next epoch (§9.2), so no removal is lost; but until that admin is back in
+    reach, a member it removed may hold the key of the epoch that stood, and messages of that
+    epoch reach those on the other update only once their senders moved over and sealed them
+    afresh. A message of the current epoch that does not open now waits instead of being
+    acknowledged, so whoever passes on a forged one may send it again for up to a day. The rule
+    is tested, not modelled formally.
 
 ## 8. Suggested audit priorities
 

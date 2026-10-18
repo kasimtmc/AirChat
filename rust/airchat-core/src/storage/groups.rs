@@ -292,6 +292,37 @@ impl Database {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Replaces the epoch held with another update of the same epoch (§9.2: of two, the one with
+    /// the smaller update id is the group's); the previous epoch stays.
+    pub fn replace_group_epoch(
+        &self,
+        row: i64,
+        roster: &Roster,
+        epoch_key: &SecretBytes<32>,
+        update: &[u8],
+    ) -> Result<(), StorageError> {
+        let transaction = self.conn.unchecked_transaction()?;
+        let changed = transaction.execute(
+            "UPDATE groups SET name = ?3, epoch_key = ?4, roster = ?5 WHERE id = ?1 AND epoch = ?2 AND state = 0",
+            params![
+                row,
+                roster.epoch as i64,
+                roster.name,
+                epoch_key.expose().as_slice(),
+                roster.encode().as_slice()
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::Corrupt);
+        }
+        transaction.execute(
+            "UPDATE group_updates SET bytes = ?3 WHERE group_ = ?1 AND epoch = ?2",
+            params![row, roster.epoch as i64, update],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Left, removed or ended: the keys are overwritten, the history stays.
     pub fn end_membership(&self, row: i64, membership: Membership) -> Result<(), StorageError> {
         self.conn.execute(
@@ -787,6 +818,16 @@ impl Database {
 
     /// Tries one of this device's group messages given up again from `now_ms`, sealed afresh as
     /// `sealed`. Returns it, or `None` if `row` names none given up; the caller queues it.
+    /// One of this device's group messages, sealed afresh: under the other update of its epoch
+    /// when this device moved to that one (§9.2).
+    pub fn reseal_group_message(&self, row: i64, sealed: &[u8]) -> Result<(), StorageError> {
+        self.conn.execute(
+            "UPDATE group_messages SET sealed = ?2 WHERE id = ?1 AND outgoing = 1",
+            params![row, sealed],
+        )?;
+        Ok(())
+    }
+
     pub fn try_group_message_again(
         &self,
         row: i64,

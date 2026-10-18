@@ -295,6 +295,12 @@ in the node (`node/groups.rs`).
   deletion only, out of sight (`groups.state` 3, migration 20), and goes entirely a day later.
   A group of two whose other member left or ran out ends on the remaining device (`groups.state`
   4, migration 21): keys wiped, history kept.
+- **Two updates of one epoch** (protocol §9.2): the node keeps the one with the smaller update id,
+  replacing the epoch it holds in place (`replace_group_epoch`; the previous epoch stays), seals
+  its own messages of that epoch afresh under the new key (`reseal_group_messages`, which also lets
+  them go once more over links they went over already), and, if the update set aside was its own,
+  makes its change again in the next epoch (`make_change_again`). Messages of the epoch held that
+  do not open wait with those of epochs not held yet.
 - **Peers:** members who are not contacts are kept as contact rows in a fourth state, *peer*, with
   the keys from the roster. They never appear in the contact list and are forgotten once no group
   or queued item is shared with them. Pairing with a peer makes them an ordinary contact.
@@ -682,9 +688,6 @@ through providers was dropped on 2026-10-13: senders keep their messages, M-8.) 
   of the contact link handshake and of pairing (`rust/airchat-protocol/formal/`) and hours of
   fuzzing of every target are done; models of group keys and the mesh, and an independent audit
   remain.
-- **Groups changed by two admins at once:** both start the same epoch and devices keep whichever
-  came first; a rule for picking one, and for keeping the other admin's change, is still to come
-  (threat model, weakness 15).
 - **Wi-Fi Aware end to end:** needs a second phone that has it.
 - **Releases:** reproducible builds, a store or other way to distribute beyond GitHub releases.
 - **iOS and Linux (P-2):** platform code over the same Rust core.

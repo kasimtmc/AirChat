@@ -1020,12 +1020,27 @@ signature     = Ed25519(signer, "AirChat v1 group-update" || every field before 
   the roster's `group_id` and `epoch` match the update's;
 - for an unknown group (being added): the signer is one of its contacts and an admin in the roster;
 - for a known group: the epoch is newer than the one it holds and the signer is an admin in the
-  roster it holds. An update it cannot verify yet (the signer became an admin in an epoch it
-  missed) waits until the missing updates arrive.
+  roster it holds (or the epoch is the one it holds: see below). An update it cannot verify yet
+  (the signer became an admin in an epoch it missed) waits until the missing updates arrive.
 
 An update without the device's envelope, signed by an admin of the roster it holds and newer than
 it, tells it that it was removed: it drops the group's keys. A device keeps the group's updates to
 pass them on (§9.5).
+
+**Two updates of one epoch.** Two admins who change a group out of each other's reach both start
+the next epoch. Of two valid updates of the same epoch, the one with the smaller update id (§9.5,
+compared as bytes) is the group's, at every member:
+
+- A device that holds the other takes it when it comes, if its signer is an admin in the roster of
+  the device's previous epoch (else it waits, as above). It replaces the epoch's key and roster (the
+  previous epoch stays), passes the update on like any other, also to those only the other update
+  had, and seals its own messages of that epoch afresh under the new key, with the same message
+  ids, queuing them for the members again. If the update leaves it out, it was removed.
+- An update of the epoch held with a larger id changes nothing.
+- The admin whose update was set aside makes its change again on the roster that stands, in the
+  next epoch: members it added are added, members it removed are removed, roles and the name it
+  changed are changed, as far as that is still possible. A removal is so never lost; until it is
+  made again, the member removed may hold the key of the epoch that stood.
 
 **Admins and members** (requirement M-3). An admin makes another member an admin, or no longer one,
 with a new epoch; a roster always has an admin. A member who leaves sends *group leave* (`0x43`)
@@ -1066,9 +1081,10 @@ content = 0x01 || text (UTF-8, 1–8192 bytes)
 
 A device stores a group message once (by `group_id` and `message_id`) when the sender is a member of
 that epoch, the signature verifies and it decrypts. Messages of an epoch the device does not hold
-yet wait for its update; messages of an epoch older than the newest one it holds are still read if
-it holds that epoch's key (they may arrive late) and the sender is also in the newest roster it
-holds. Someone removed, or gone, may still hold an earlier epoch's key and write as if before it
+yet wait for its update, and so do messages of the epoch it holds that do not open, which may be
+sealed under the other update of that epoch (§9.2); messages of an epoch older than the newest one
+it holds are still read if it holds that epoch's key (they may arrive late) and the sender is also
+in the newest roster it holds. Someone removed, or gone, may still hold an earlier epoch's key and write as if before it
 went, which nothing could tell from a message that was late; so its late messages are lost with it.
 
 `sent_at` is the sender's claim, signed but not proven: a member can date a message as it likes.
@@ -1125,8 +1141,9 @@ listed rather than recomputed).
   message id), it is queued for the members again and its new try begins then. A message some
   member took shows as such; whoever still lacks it a day later is no longer sent it. An
   acknowledgement that comes for a message given up still counts.
-- A message of an epoch the device does not hold yet waits, unacknowledged, for its update; so does
-  an update signed by someone who is not an admin in the roster held. An update of a group the
+- A message of an epoch the device does not hold yet waits, unacknowledged, for its update, as does
+  one of the epoch it holds that does not open (§9.2); so does an update signed by someone who is
+  not an admin in the roster held. An update of a group the
   device does not know is taken only if it addresses the device and its signer is an admin of the
   new roster and an active contact of the device.
 - A member leaves with *group leave*, queued for every member (and not passed on): an admin who

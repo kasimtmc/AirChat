@@ -821,6 +821,13 @@ impl Node {
         let me = account.identity().public();
         let db = account.db();
         let held = db.group_by_id(&update.group_id).ok().flatten();
+        // Another update of the epoch held: two admins changed the group at once (§9.2).
+        if let Some(held) = held
+            .as_ref()
+            .filter(|g| g.membership == Membership::Member && g.epoch == update.epoch)
+        {
+            return self.take_rival_update(source, bytes, &update, held);
+        }
         // Old news, also for a group this device left or was removed from; and a group deleted
         // for everyone stays so.
         if held
@@ -899,6 +906,222 @@ impl Node {
         Ok(Some(actions))
     }
 
+    /// Another update of the epoch this device holds (§9.2). Of two, the one with the smaller update
+    /// id is the group's: this device moves to it if it holds the other, and if this device signed
+    /// the other, it makes its change again in the next epoch.
+    fn take_rival_update(
+        &mut self,
+        source: ContactId,
+        bytes: &[u8],
+        update: &Update,
+        held: &StoredGroup,
+    ) -> Result<Option<Vec<Action>>, Wait> {
+        let Store::Open(account) = &self.store else {
+            return Ok(None);
+        };
+        let me = account.identity().public();
+        let db = account.db();
+        let Some(ours) = db
+            .group_update_row(held.row, held.epoch)
+            .ok()
+            .flatten()
+            .and_then(|row| db.group_update(row).ok().flatten())
+        else {
+            return Ok(None);
+        };
+        if group::update_id(bytes) >= group::update_id(&ours) {
+            return Ok(None);
+        }
+        // Both were made from the epoch before, held here as the previous one; one this device
+        // cannot check yet waits, like any update.
+        let Some((_, before)) = held.previous.as_ref() else {
+            return Err(Wait);
+        };
+        if !before.is_admin(&update.signer) {
+            return Err(Wait);
+        }
+        if !update.addresses(&me) {
+            let _ = db.end_membership(held.row, Membership::Removed);
+            let summary = db.group(held.row).ok().flatten().map(|g| g.summary(&me));
+            let mut actions: Vec<Action> = summary
+                .map(|group| Action::GroupChanged { group })
+                .into_iter()
+                .collect();
+            actions.extend(self.refresh_groups());
+            return Ok(Some(actions));
+        }
+        let Some(opened) = account.static_keys().find_map(|(_, key)| update.open(&me, key).ok()) else {
+            return Ok(None);
+        };
+        let set_aside = held.roster.clone();
+        let mine = Update::read(&ours).is_ok_and(|u| u.signer == me);
+        let before = before.clone();
+        if db
+            .replace_group_epoch(held.row, &opened.roster, &opened.epoch_key, bytes)
+            .is_err()
+        {
+            return Ok(None);
+        }
+        // Passed on to the members, and to those only the other update had, so they move too.
+        let extra: Vec<PublicIdentity> = set_aside
+            .members()
+            .iter()
+            .filter(|m| opened.roster.member(&m.identity).is_none())
+            .map(|m| m.identity)
+            .collect();
+        let mut recipients = self.member_rows(&opened.roster, &extra).unwrap_or_default();
+        recipients.retain(|&r| r != source);
+        let mut actions = Vec::new();
+        if let Store::Open(account) = &self.store {
+            let db = account.db();
+            if let Some(update_row) = db.group_update_row(held.row, held.epoch).ok().flatten() {
+                let _ = db.queue_group_item(Outgoing::Update(update_row), &recipients, now_ms());
+            }
+            if let Some(group) = db.group(held.row).ok().flatten() {
+                actions.push(Action::GroupChanged {
+                    group: group.summary(&me),
+                });
+            }
+        }
+        actions.extend(self.refresh_groups());
+        for &recipient in &recipients {
+            actions.extend(self.flush_group_outbox(recipient));
+        }
+        actions.extend(self.mesh_send_update(held.row, &recipients));
+        actions.extend(self.reseal_group_messages(held.row));
+        if mine {
+            actions.extend(self.make_change_again(held.row, &before, &set_aside));
+        }
+        Ok(Some(actions))
+    }
+
+    /// This device's messages of the group's current epoch, sealed afresh under its key (same
+    /// message ids) and queued for the members again: after it moved to the other update of the
+    /// epoch, which those who hold that one could not read them under (§9.2).
+    fn reseal_group_messages(&mut self, row: i64) -> Vec<Action> {
+        let Ok(account) = self.account() else {
+            return Vec::new();
+        };
+        let db = account.db();
+        let Some(stored) = db.group(row).ok().flatten() else {
+            return Vec::new();
+        };
+        let mut resealed = Vec::new();
+        for message in db
+            .group_messages(row)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| m.outgoing)
+        {
+            let Some(sealed) = db.group_message_sealed(message.row).ok().flatten() else {
+                continue;
+            };
+            if !group::Message::read(&sealed).is_ok_and(|m| m.epoch == stored.epoch) {
+                continue;
+            }
+            let content = match &message.attachment {
+                Some(file) => Content::File(FileMeta {
+                    name: file.name.clone(),
+                    mime: file.mime.clone(),
+                    size: file.size,
+                    sha256: file.sha256,
+                    thumbnail: file.thumbnail.clone(),
+                }),
+                None => Content::Text(Zeroizing::new(message.body.clone())),
+            };
+            let Ok(sealed) = group::seal_message(
+                &stored.group_id,
+                stored.epoch,
+                &stored.epoch_key,
+                &message.message_id,
+                account.identity(),
+                u64::try_from(message.sent_at_ms).unwrap_or(0),
+                &content,
+            ) else {
+                continue;
+            };
+            if db.reseal_group_message(message.row, &sealed).is_ok() {
+                resealed.push((message.row, message.message_id, sealed));
+            }
+        }
+        let mut actions = Vec::new();
+        let Ok(tag_key) = crate::mesh::group_tag_key(&stored.epoch_key, &stored.group_id, stored.epoch) else {
+            return actions;
+        };
+        // Sent over a link already, sealed the other way: it goes once more.
+        for in_flight in self.group_traffic.in_flight.values_mut() {
+            in_flight.retain(|row| !resealed.iter().any(|(resealed, _, _)| resealed == row));
+        }
+        for (row, message_id, sealed) in resealed {
+            actions.extend(self.share_group_message(&stored.roster, row).unwrap_or_default());
+            actions.extend(self.mesh_send_group(&stored.group_id, &message_id, &sealed, &tag_key, now_ms()));
+        }
+        actions
+    }
+
+    /// After this device's update of an epoch was set aside for another (§9.2): its change, from
+    /// `before` to `mine`, made again on the group's roster in the next epoch: members it added are
+    /// added, those it removed removed, roles and the name it changed changed, where they still can
+    /// be. Nothing if it is no longer an admin, or if nothing would change.
+    fn make_change_again(&mut self, row: i64, before: &Roster, mine: &Roster) -> Vec<Action> {
+        let Ok(stored) = self.administered(row) else {
+            return Vec::new();
+        };
+        let removed: Vec<PublicIdentity> = before
+            .members()
+            .iter()
+            .filter(|m| mine.member(&m.identity).is_none())
+            .map(|m| m.identity)
+            .collect();
+        let mut members: Vec<Member> = stored
+            .roster
+            .members()
+            .iter()
+            .filter(|m| !removed.contains(&m.identity))
+            .cloned()
+            .collect();
+        for added in mine.members().iter().filter(|m| before.member(&m.identity).is_none()) {
+            if !members.iter().any(|m| m.identity == added.identity) {
+                members.push(added.clone());
+            }
+        }
+        for member in &mut members {
+            if let (Some(was), Some(now)) = (before.member(&member.identity), mine.member(&member.identity))
+                && was.role != now.role
+            {
+                member.role = now.role;
+            }
+        }
+        let name = if mine.name != before.name {
+            mine.name.clone()
+        } else {
+            stored.name.clone()
+        };
+        let Ok(members) = self.freshened(&members) else {
+            return Vec::new();
+        };
+        let Ok(roster) = Roster::new(stored.group_id, stored.epoch + 1, &name, members) else {
+            return Vec::new();
+        };
+        let unchanged = Roster::new(
+            stored.group_id,
+            stored.epoch + 1,
+            &stored.name,
+            stored.roster.members().to_vec(),
+        )
+        .is_ok_and(|same| same.encode() == roster.encode());
+        if unchanged {
+            return Vec::new();
+        }
+        let gone: Vec<PublicIdentity> = removed
+            .into_iter()
+            .filter(|identity| stored.roster.member(identity).is_some())
+            .collect();
+        self.start_epoch(roster, &gone)
+            .map(|(_, actions)| actions)
+            .unwrap_or_default()
+    }
+
     /// A group message (§9.3): stored once and passed on. Returns actions, and the acknowledgement
     /// to send back (none while it waits for its epoch).
     pub(super) fn take_group_message(
@@ -947,6 +1170,16 @@ impl Node {
             return (Vec::new(), Some(ack));
         }
         let Ok((sent_at, content)) = message.open(key) else {
+            // Of the epoch held, it may be sealed under the other update of it (§9.2): it waits,
+            // like a message of an epoch not held yet, and opens once this device holds that one.
+            if message.epoch == held.epoch {
+                let waiting = &mut self.group_traffic.waiting_messages;
+                if waiting.len() >= MAX_WAITING {
+                    waiting.remove(0);
+                }
+                waiting.push((source, sealed.to_vec()));
+                return (Vec::new(), None);
+            }
             // Forged or broken: whoever passes it on may stop.
             return (Vec::new(), Some(ack));
         };
@@ -1633,17 +1866,68 @@ pub(super) mod tests {
         assert_eq!(net.texts(BURAK), ["geç"]);
     }
 
+    /// Ayşe and Burak, both admins, change the group while out of each other's reach: Ayşe removes
+    /// Cem; Burak makes Cem an admin, and writes. Once they meet they hold one roster again, the
+    /// same whichever update won (§9.2): Cem is out, and Burak's message reached Ayşe.
     #[test]
-    fn a_second_update_of_the_same_epoch_is_ignored() {
+    fn two_admins_changing_the_group_at_once_end_up_on_one_roster() {
+        let roster = |net: &Net, at: usize| {
+            let db = net.devices[at].node.account().unwrap().db();
+            db.group(net.group(at).row).unwrap().unwrap().roster
+        };
+        let update_id = |net: &Net, at: usize, epoch: u64| {
+            let db = net.devices[at].node.account().unwrap().db();
+            let row = db.group_update_row(net.group(at).row, epoch).unwrap().unwrap();
+            group::update_id(&db.group_update(row).unwrap().unwrap())
+        };
+        let mut seen = [false; 2];
+        for _ in 0..40 {
+            let mut net = kamp();
+            let (burak, cem) = (net.identity(BURAK), net.identity(CEM));
+            let row = net.group(AYSE).row;
+            let (_, actions) = net.node(AYSE).set_group_admin(row, &burak, true).unwrap();
+            net.run(AYSE, actions);
+            assert_eq!(net.group(BURAK).epoch, 1);
+            net.cut(AYSE, BURAK);
+            let (_, actions) = net.node(AYSE).remove_group_member(row, &cem).unwrap();
+            net.run(AYSE, actions);
+            let row = net.group(BURAK).row;
+            let (_, actions) = net.node(BURAK).set_group_admin(row, &cem, true).unwrap();
+            net.run(BURAK, actions);
+            net.say(BURAK, "ayrıyken");
+            let ayse_won = update_id(&net, AYSE, 2) < update_id(&net, BURAK, 2);
+
+            net.link(AYSE, BURAK);
+            let (ayse, burak_group) = (net.group(AYSE), net.group(BURAK));
+            assert_eq!(ayse.epoch, burak_group.epoch);
+            // Burak's change has nothing left to do once Cem is out; Ayşe's is made again.
+            assert_eq!(ayse.epoch, if ayse_won { 2 } else { 3 });
+            assert_eq!(roster(&net, AYSE).encode(), roster(&net, BURAK).encode());
+            assert!(roster(&net, AYSE).member(&cem).is_none(), "the removal stands");
+            assert!(net.texts(AYSE).iter().any(|t| t == "ayrıyken"));
+            seen[usize::from(ayse_won)] = true;
+            if seen == [true, true] {
+                return;
+            }
+        }
+        panic!("each update should have won at least once");
+    }
+
+    #[test]
+    fn of_two_updates_of_one_epoch_the_one_with_the_smaller_id_stands() {
         let mut net = kamp();
         let cem = net.identity(CEM);
         let row = net.group(AYSE).row;
         let (_, actions) = net.node(AYSE).remove_group_member(row, &cem).unwrap();
         net.run(AYSE, actions);
         assert_eq!((net.group(BURAK).epoch, net.group(BURAK).members), (1, 2));
-        // Another epoch 1, validly signed by the admin, with Cem back in: the first one stands
-        // (threat model, weakness 15: there is no rule yet for picking one of two).
-        let other = {
+        let held_id = |net: &Net| {
+            let db = net.devices[BURAK].node.account().unwrap().db();
+            let row = db.group_update_row(net.group(BURAK).row, 1).unwrap().unwrap();
+            group::update_id(&db.group_update(row).unwrap().unwrap())
+        };
+        // Other epochs 1, validly signed by the admin, with Cem back in (as if made elsewhere).
+        let other = |net: &Net| {
             let ayse = net.devices[AYSE].node.account().unwrap();
             let burak = net.devices[BURAK].node.account().unwrap();
             let held = burak.db().group(net.group(BURAK).row).unwrap().unwrap();
@@ -1659,8 +1943,32 @@ pub(super) mod tests {
             group::seal_update(&roster, &SecretBytes::random().unwrap(), ayse.identity()).unwrap()
         };
         let from = net.contact(BURAK, AYSE);
-        assert!(net.node(BURAK).take_update(from, other).is_empty());
+        // A larger id is set aside.
+        let larger = std::iter::repeat_with(|| other(&net))
+            .find(|u| group::update_id(u) > held_id(&net))
+            .unwrap();
+        assert!(net.node(BURAK).take_update(from, larger).is_empty());
         assert_eq!((net.group(BURAK).epoch, net.group(BURAK).members), (1, 2));
+        // A smaller one replaces the epoch held; the previous one stays.
+        let smaller = std::iter::repeat_with(|| other(&net))
+            .find(|u| group::update_id(u) < held_id(&net))
+            .unwrap();
+        assert!(!net.node(BURAK).take_update(from, smaller.clone()).is_empty());
+        assert_eq!((net.group(BURAK).epoch, net.group(BURAK).members), (1, 3));
+        assert_eq!(
+            held_id(&net),
+            group::update_id(&smaller),
+            "and passed on as the epoch's update"
+        );
+        let stored = net.devices[BURAK]
+            .node
+            .account()
+            .unwrap()
+            .db()
+            .group(net.group(BURAK).row)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.previous.as_ref().map(|(_, r)| r.epoch), Some(0));
     }
 
     #[test]

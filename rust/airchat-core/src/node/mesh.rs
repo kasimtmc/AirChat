@@ -1409,6 +1409,18 @@ pub(super) mod tests {
             ..envelope(5)
         };
         assert!(net.node(BURAK).take_envelope(Some(from), expired, now).1.is_empty());
+        // Beyond the limits (§10.4): more than 8 hops count as 8, and an expiry more than a day
+        // ahead as a day, also for how long the id is remembered.
+        let far = Envelope {
+            id: [10; 16],
+            hops: u8::MAX,
+            expires: u32::MAX,
+            ..envelope(5)
+        };
+        let (_, sends) = net.node(BURAK).take_envelope(Some(from), far, now);
+        assert!(matches!(&sends[0].1, ChatMessage::MeshEnvelope(e) if e.hops == MAX_HOPS - 1));
+        let remembered = net.node(BURAK).mesh.seen[&[10; 16]].expires;
+        assert_eq!(remembered, minute(now) + MAX_LIFETIME_MINUTES);
     }
 
     #[test]
