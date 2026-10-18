@@ -78,6 +78,9 @@ impl TagKey {
 pub struct TagChecker {
     /// Nonces accepted so far, with the epoch they were made for.
     used: HashMap<Nonce, u64>,
+    /// The epoch `used` was last pruned for: pruning walks every nonce, so it runs once an epoch,
+    /// not on every attempt, which anyone who can make tags (a channel's members) could repeat.
+    pruned: u64,
 }
 
 impl TagChecker {
@@ -90,7 +93,10 @@ impl TagChecker {
         contacts: impl IntoIterator<Item = &'a (C, TagKey)>,
     ) -> Option<C> {
         // A nonce of an epoch that left the window can no longer verify, so it need not be kept.
-        self.used.retain(|_, made_in| made_in.saturating_add(1) >= epoch);
+        if epoch != self.pruned {
+            self.used.retain(|_, made_in| made_in.saturating_add(1) >= epoch);
+            self.pruned = epoch;
+        }
         let nonce: Nonce = tag[..NONCE_LEN].try_into().expect("tag starts with its nonce");
         if self.used.contains_key(&nonce) {
             return None;
@@ -199,5 +205,23 @@ mod tests {
             "out of the window"
         );
         assert!(checker.used.is_empty());
+    }
+
+    #[test]
+    fn used_nonces_are_pruned_once_an_epoch() {
+        let a = Identity::generate().unwrap().public();
+        let b = Identity::generate().unwrap().public();
+        let contacts = [(1, key(&a, &b))];
+        let ab = &contacts[0].1;
+        let mut checker = TagChecker::default();
+        assert!(checker.claim(&ab.tag(100, &[1; 16]), 100, &contacts).is_some());
+        assert_eq!(checker.pruned, 100);
+        // Planted after the pruning of epoch 100: stays for the rest of it, goes with the next.
+        checker.used.insert([9; 16], 10);
+        assert!(checker.claim(&ab.tag(100, &[2; 16]), 100, &contacts).is_some());
+        assert!(checker.used.contains_key(&[9; 16]));
+        assert!(checker.claim(&ab.tag(101, &[3; 16]), 101, &contacts).is_some());
+        assert!(!checker.used.contains_key(&[9; 16]));
+        assert_eq!(checker.used.len(), 3);
     }
 }
