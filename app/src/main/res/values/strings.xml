@@ -176,6 +176,7 @@
     <string name="air_provider_hot">The phone is hot: Air Provider waits until it cools down</string>
     <string name="air_provider_warning">Your phone will carry other people\'s calls, video and files, encrypted, over Wi-Fi. This uses battery: above 50% it carries everything, from 20% calls only, and below 20% or when the phone gets hot it turns itself off. Calls and files it took on are carried to the end. It keeps nothing for people out of reach.</string>
     <string name="air_provider_turn_on">Turn on</string>
+    <string name="air_provider_unsupported">This phone has no Wi-Fi Aware, which a provider needs so that others find it as far as Wi-Fi reaches. You can still use other people\'s providers.</string>
     <string name="air_provider_stopped">Air Provider turned off: the battery is low or the phone is hot.</string>
     <string name="channel_status">Status</string>
     <string name="call_via_provider">Out of range: connecting through Air Providers. The call starts once connected.</string>

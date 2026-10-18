@@ -683,9 +683,10 @@ Implemented so far (Android, `app/src/main/java/com/plyg/airchat/net/`):
   1. Documents (this). Gate: no provider gains anything it can read or change.
   2. The Wi-Fi check (AP-10). Gate: nothing about the network leaves the device; mDNS names stay
      random.
-  3. The provider app (AP-8), and the Air Provider switch tied to Wi-Fi Aware (AP-1). Gate: a test
-     shows no envelope, message or contact in the provider's storage after it carried traffic, and
-     its beacons are those of any phone.
+  3. The provider app (AP-8). Gate: a test shows no envelope, message or contact in the provider's
+     storage after it carried traffic, and its beacons are those of any phone. (The Air Provider
+     switch already needs Wi-Fi Aware, AP-1: `runtime/AirProvider` checks the system feature, and
+     the settings say why when it is missing.)
   4. Before release: a Tamarin model of paths (§12), long fuzzing of what reaches a provider, abuse
      limits (AP-3), and the provider app in the audit's scope.
   5. Linux providers once Wi-Fi Aware is common there (AP-11).

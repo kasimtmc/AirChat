@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.os.PowerManager
 import androidx.core.content.ContextCompat
@@ -19,10 +20,13 @@ import kotlinx.coroutines.flow.StateFlow
  * device carries other devices' calls, video and files over paths (rust/airchat-protocol/docs/protocol.md §12), and what
  * it carries follows its own state: everything while charging or above 50 % battery, calls and
  * push-to-talk only from 20 %, nothing below 20 % or when hot, and the mode then turns itself off.
+ * Only on a device with Wi-Fi Aware (AP-1): a provider must be found as far as Wi-Fi reaches.
  * Main thread only.
  */
 class AirProvider(app: Application, private val settings: SharedPreferences) {
     data class Status(
+        /** The device has Wi-Fi Aware; without it the mode is not offered. */
+        val supported: Boolean = true,
         val enabled: Boolean = false,
         /** What this device carries for others now; empty while off. */
         val classes: List<PathClass> = emptyList(),
@@ -34,13 +38,18 @@ class AirProvider(app: Application, private val settings: SharedPreferences) {
         val cannotRun: Boolean get() = hot || (!charging && batteryPercent < LOW_PERCENT)
     }
 
-    private val _status = MutableStateFlow(Status(enabled = settings.getBoolean(KEY_ENABLED, false)))
+    private val supported = app.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)
+    private val _status = MutableStateFlow(
+        Status(supported = supported, enabled = supported && settings.getBoolean(KEY_ENABLED, false)),
+    )
     val status: StateFlow<Status> = _status
 
     /** The mode turned itself off: the battery ran low or the device got hot. */
     var onStoppedItself: () -> Unit = {}
 
     init {
+        // Turned on before the mode needed Wi-Fi Aware.
+        if (!supported) settings.edit { putBoolean(KEY_ENABLED, false) }
         val battery = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) = onBattery(intent)
         }
@@ -53,9 +62,9 @@ class AirProvider(app: Application, private val settings: SharedPreferences) {
         }
     }
 
-    /** Turns the mode on or off; it stays off while the device cannot run it. */
+    /** Turns the mode on or off; it stays off while the device cannot run it, or never could. */
     fun setEnabled(enabled: Boolean) {
-        val on = enabled && !_status.value.cannotRun
+        val on = enabled && supported && !_status.value.cannotRun
         settings.edit { putBoolean(KEY_ENABLED, on) }
         update(_status.value.copy(enabled = on))
     }
@@ -72,7 +81,7 @@ class AirProvider(app: Application, private val settings: SharedPreferences) {
 
     private fun update(next: Status) {
         val stops = next.enabled && next.cannotRun
-        val enabled = next.enabled && !stops
+        val enabled = next.enabled && next.supported && !stops
         val classes = when {
             !enabled -> emptyList()
             next.charging || next.batteryPercent > HALF_PERCENT -> listOf(PathClass.VOICE, PathClass.VIDEO, PathClass.FILES)

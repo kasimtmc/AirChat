@@ -144,7 +144,7 @@ Nobody but the user can read the user's data, during or after transmission.
   carries other devices' calls, push-to-talk, video and files over Wi-Fi (paths, protocol §12).
   There are no user-chosen levels: what it carries
   at a given moment follows AP-5, and routing knows it (AP-7), so a provider that cannot carry
-  something never breaks it, it is simply not chosen for it. *(2026-10-19, planned)* Only on devices
+  something never breaks it, it is simply not chosen for it. *(2026-10-19)* Only on devices
   with Wi-Fi Aware: a provider must be found as far as Wi-Fi reaches (protocol §7.4), not only
   within Bluetooth range. On a phone without it the switch is not offered, and the app says why.
   (Reaching providers through a Wi-Fi network of their own instead was rejected: Android asks the

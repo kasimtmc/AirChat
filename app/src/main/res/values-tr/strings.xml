@@ -174,6 +174,7 @@
     <string name="air_provider_hot">Telefon ısındı: Air Provider soğuyana kadar bekliyor</string>
     <string name="air_provider_warning">Telefonun başkalarının aramalarını, görüntülerini ve dosyalarını şifreli olarak Wi-Fi ile taşıyacak. Bu pil harcar: %50 üstünde her şeyi, %20\'den itibaren yalnızca aramaları taşır; %20 altında ya da telefon ısınınca kendiliğinden kapanır. Üstlendiği arama ve dosyaları sonuna kadar taşır. Ulaşılamayan kişiler için hiçbir şey saklamaz.</string>
     <string name="air_provider_turn_on">Aç</string>
+    <string name="air_provider_unsupported">Bu telefonda Wi-Fi Aware yok. Air Provider olmak için gerekli: diğerleri seni Wi-Fi\'nin ulaştığı her yerden bulabilsin diye. Başkalarının Air Provider\'larını yine kullanabilirsin.</string>
     <string name="air_provider_stopped">Air Provider kapandı: pil azaldı ya da telefon ısındı.</string>
     <string name="channel_status">Durum</string>
     <string name="call_via_provider">Menzil dışında: Air Provider üzerinden bağlanılıyor. Bağlanınca arama başlar.</string>

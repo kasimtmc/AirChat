@@ -656,6 +656,18 @@ private fun SettingsTab(
             item { Section(R.string.settings_network) }
             item {
                 val provider = state.airProvider
+                // Not offered without Wi-Fi Aware (AP-1); the user is told why.
+                if (!provider.supported) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        Text(stringResource(R.string.air_provider), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            stringResource(R.string.air_provider_unsupported),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    return@item
+                }
                 SwitchRow(
                     stringResource(R.string.air_provider),
                     when {
