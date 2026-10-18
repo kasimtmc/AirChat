@@ -941,6 +941,11 @@ impl Node {
         if roster.member(&message.sender).is_none() {
             return (Vec::new(), Some(ack));
         }
+        // Someone removed (or gone) since may still hold that epoch's key and write as if before
+        // it went: of an earlier epoch, only those still in the group are read (§9.3).
+        if message.epoch < held.epoch && held.roster.member(&message.sender).is_none() {
+            return (Vec::new(), Some(ack));
+        }
         let Ok((sent_at, content)) = message.open(key) else {
             // Forged or broken: whoever passes it on may stop.
             return (Vec::new(), Some(ack));
@@ -1551,8 +1556,12 @@ pub(super) mod tests {
                 .unwrap()
         };
         let from = net.contact(CEM, AYSE);
-        assert!(net.node(CEM).take_update(from, first).is_empty());
+        assert!(net.node(CEM).take_update(from, first.clone()).is_empty());
         assert_eq!(net.group(CEM).membership, Membership::Removed);
+        // Nor does it take Burak, a member, back to the epoch with Cem.
+        let from = net.contact(BURAK, AYSE);
+        assert!(net.node(BURAK).take_update(from, first).is_empty());
+        assert_eq!((net.group(BURAK).epoch, net.group(BURAK).members), (1, 2));
         // Burak, a member, cannot change the members.
         let row = net.group(BURAK).row;
         let ayse = net.identity(AYSE);
@@ -1566,6 +1575,62 @@ pub(super) mod tests {
             net.node(CEM).send_group_message(row, "hâlâ burada mıyım?"),
             Err(NodeError::NoSuchGroup)
         ));
+    }
+
+    #[test]
+    fn a_removed_member_cannot_write_into_the_epoch_it_was_in() {
+        let mut net = kamp();
+        let row = net.group(AYSE).row;
+        let (group_id, old_key) = {
+            let stored = net.devices[AYSE]
+                .node
+                .account()
+                .unwrap()
+                .db()
+                .group(row)
+                .unwrap()
+                .unwrap();
+            (stored.group_id, stored.epoch_key.clone())
+        };
+        let cem = net.identity(CEM);
+        let (_, actions) = net.node(AYSE).remove_group_member(row, &cem).unwrap();
+        net.run(AYSE, actions);
+        assert_eq!(net.group(BURAK).epoch, 1);
+        // Cem kept epoch 0's key (a modified app would) and writes as if before he was removed.
+        let forged = {
+            let account = net.devices[CEM].node.account().unwrap();
+            group::seal_message(
+                &group_id,
+                0,
+                &old_key,
+                &[7; 16],
+                account.identity(),
+                1,
+                &Content::Text(Zeroizing::new("eski".into())),
+            )
+            .unwrap()
+        };
+        let from = net.contact(BURAK, AYSE);
+        let (actions, ack) = net.node(BURAK).take_group_message(from, &forged);
+        assert!(actions.is_empty());
+        assert!(ack.is_some(), "acknowledged, so whoever passes it on stops");
+        assert!(net.texts(BURAK).is_empty());
+        // A late message of epoch 0 from someone still in the group is read.
+        let late = {
+            let account = net.devices[AYSE].node.account().unwrap();
+            group::seal_message(
+                &group_id,
+                0,
+                &old_key,
+                &[8; 16],
+                account.identity(),
+                2,
+                &Content::Text(Zeroizing::new("geç".into())),
+            )
+            .unwrap()
+        };
+        net.node(BURAK).take_group_message(from, &late);
+        assert_eq!(net.texts(BURAK), ["geç"]);
     }
 
     #[test]

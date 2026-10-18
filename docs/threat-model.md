@@ -138,7 +138,11 @@ Someone the user added as a contact.
 
 - **A member can:** read and keep the group's content of its epochs, see when fellow members are
   nearby (as a contact would, §9.4), and pass group traffic on selectively. It cannot read epochs
-  before it joined or after it left or was removed (M-4, §9.2), or change the members.
+  before it joined or after it left or was removed (M-4, §9.2), or change the members. Once removed,
+  it cannot write into the group either: a device that holds the new epoch reads earlier epochs'
+  messages only from those still in it (§9.3), even though a removed member's modified client may
+  keep the old key. The date a member puts on a message is its own claim; apps show when a message
+  arrived.
 - **An admin can, by design:** add and remove members, make others admins, and delete the group for
   everyone, which deletes its history from every member's device as soon as the deletion reaches it
   (M-2, §9.2). Only an admin of the epoch, still an admin in the newest roster a member holds, is
@@ -268,6 +272,11 @@ Listed for the audit; some are deliberate trade-offs, some may change.
     user's own answer is the emergency exit (C-7).
 14. Verified builds trust Google's attestation roots and a revocation list as recent as the build;
     leaked attestation keys pass until revoked and the user updates (§6.10, A12).
+15. Two admins who change a group at the same time, out of each other's reach, both start the
+    same epoch number. A device takes whichever comes first and ignores the other (§9.2), so
+    members can end up on different keys for that epoch, unable to read each other's messages
+    of it, until an admin starts the next; and that admin builds on the roster it holds, which
+    can undo the other admin's change, a removal included. There is no rule yet for picking one.
 
 ## 8. Suggested audit priorities
 

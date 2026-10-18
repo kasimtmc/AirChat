@@ -48,8 +48,10 @@ hop by the link session.
     random 192-bit nonces for local storage.
   - Hash, MAC, KDF: SHA-256, HMAC-SHA-256, HKDF-SHA-256 (RFC 5869).
   - PIN stretching (local only, never on the wire): Argon2id, default 64 MiB, 3 passes, 1 lane.
-- Encoding: *TBD* — candidates are fixed binary layouts or deterministic CBOR. Must be canonical so
-  that signed data has exactly one encoding.
+- Encoding: fixed binary layouts, given byte by byte where each format is defined: fixed-size
+  fields, explicit lengths and counts, nothing left to the encoder, so everything signed or hashed
+  has exactly one encoding. Decoders reject trailing bytes. (Deterministic CBOR was considered and
+  not used; this stays so for version 1.)
 - Every frame starts with a protocol version and a frame type.
 - `||` is byte concatenation. Integers are big-endian unless stated otherwise.
 - **Domain separation.** Every hash, KDF and signature input starts with a label of the form
@@ -1065,7 +1067,13 @@ content = 0x01 || text (UTF-8, 1–8192 bytes)
 A device stores a group message once (by `group_id` and `message_id`) when the sender is a member of
 that epoch, the signature verifies and it decrypts. Messages of an epoch the device does not hold
 yet wait for its update; messages of an epoch older than the newest one it holds are still read if
-it holds that epoch's key (they may arrive late).
+it holds that epoch's key (they may arrive late) and the sender is also in the newest roster it
+holds. Someone removed, or gone, may still hold an earlier epoch's key and write as if before it
+went, which nothing could tell from a message that was late; so its late messages are lost with it.
+
+`sent_at` is the sender's claim, signed but not proven: a member can date a message as it likes.
+Devices show and order messages by when they arrived, and do not present `sent_at` as the time a
+message was written.
 
 ### 9.4 Group links
 
