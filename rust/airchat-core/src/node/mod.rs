@@ -52,7 +52,7 @@ use crate::{
     },
     discovery::{PairingBeacon, PresenceToken, presence_token},
     group::{self, GroupError, GroupId},
-    identity::PublicIdentity,
+    identity::{Identity, PublicIdentity},
     inbox::{InboxEvent, InboxWriter},
     link::{
         CHANNEL_MESSAGE_1, ChannelInitiator, ChannelResponder, Initiator, LinkError, LocalKeys, MESH_MESSAGE_1, Record,
@@ -438,6 +438,8 @@ enum ConnectionState {
 enum Store {
     Open(Box<Account>),
     Sealed(Box<Sealed>),
+    /// A provider device (requirements AP-8): no account, nothing stored, only passing on.
+    Provider,
 }
 
 /// What a sealed node keeps besides its link keys.
@@ -661,6 +663,36 @@ impl LinkMaterial {
         })
     }
 
+    /// A provider device's: new keys every start, in memory only, and nobody to link with. The
+    /// presence key makes the beacon others open mesh links to (§10.2); identity and static key
+    /// are never shown to anyone, as there are no contacts to show them to.
+    fn ephemeral() -> Result<Self, NodeError> {
+        let identity = Identity::generate()?;
+        let static_kem = DecapsulationKey::generate()?;
+        let signature = identity.sign_static_key(0, static_kem.encapsulation_key());
+        Ok(Self {
+            identity: identity.public(),
+            announcement: ChatMessage::StaticKey {
+                version: 0,
+                key: static_kem.encapsulation_key().clone(),
+                signature,
+            },
+            locals: vec![(
+                0,
+                LocalKeys {
+                    identity: identity.public(),
+                    static_kem,
+                },
+            )],
+            presence_key: SecretBytes::random()?,
+            presence_version: 0,
+            contacts: HashMap::new(),
+            groups: HashMap::new(),
+            channel: None,
+            display_name: String::new(),
+        })
+    }
+
     /// This device's side of links: its newest static key.
     fn local(&self) -> &LocalKeys {
         &self.locals[0].1
@@ -875,9 +907,28 @@ impl Node {
     /// into the database first: the process may have been killed before it was unlocked again.
     pub fn new(account: Account) -> Result<Self, NodeError> {
         let (_, group_records) = account.absorb_inbox()?;
-        let mut node = Self {
-            keys: LinkMaterial::load(&account)?,
-            store: Store::Open(Box::new(account)),
+        let mut node = Self::with(LinkMaterial::load(&account)?, Store::Open(Box::new(account)))?;
+        if let Store::Open(account) = &node.store {
+            node.prekeys.reload(account);
+        }
+        // Nothing is linked yet, and the platform reads the rest from the database.
+        node.take_inboxed(group_records);
+        node.account()?.clear_inbox()?;
+        node.resume_mesh_files(now_secs());
+        Ok(node)
+    }
+
+    /// Starts a provider device's node (requirements AP-8): no account, new keys in memory, and
+    /// nothing written anywhere. It opens mesh links to every device it sees, passes envelopes on
+    /// (§10.4) and carries paths (§12), being the recipient of nothing.
+    pub fn provider() -> Result<Self, NodeError> {
+        Self::with(LinkMaterial::ephemeral()?, Store::Provider)
+    }
+
+    fn with(keys: LinkMaterial, store: Store) -> Result<Self, NodeError> {
+        Ok(Self {
+            keys,
+            store,
             connections: HashMap::new(),
             links: HashMap::new(),
             setup_only: HashSet::new(),
@@ -912,33 +963,30 @@ impl Node {
             opening: HashSet::new(),
             link_starts: HashMap::new(),
             call_healed_at: 0,
-        };
-        if let Store::Open(account) = &node.store {
-            node.prekeys.reload(account);
-        }
-        // Nothing is linked yet, and the platform reads the rest from the database.
-        node.take_inboxed(group_records);
-        node.account()?.clear_inbox()?;
-        node.resume_mesh_files(now_secs());
-        Ok(node)
+        })
     }
 
     pub fn account(&self) -> Result<&Account, NodeError> {
         match &self.store {
             Store::Open(account) => Ok(account),
-            Store::Sealed(_) => Err(NodeError::Sealed),
+            Store::Sealed(_) | Store::Provider => Err(NodeError::Sealed),
         }
     }
 
     pub fn account_mut(&mut self) -> Result<&mut Account, NodeError> {
         match &mut self.store {
             Store::Open(account) => Ok(account),
-            Store::Sealed(_) => Err(NodeError::Sealed),
+            Store::Sealed(_) | Store::Provider => Err(NodeError::Sealed),
         }
     }
 
     pub fn is_sealed(&self) -> bool {
         matches!(self.store, Store::Sealed(_))
+    }
+
+    /// Whether this is a provider device's node ([`Node::provider`]).
+    pub fn is_provider(&self) -> bool {
+        matches!(self.store, Store::Provider)
     }
 
     // Locking.
@@ -2568,6 +2616,7 @@ impl Node {
                     }
                 }
             }
+            Store::Provider => {}
             Store::Sealed(sealed) => {
                 for pending in sealed.pending.iter().filter(|p| p.contact == contact) {
                     let chat = text_message(pending.id, pending.sent_at_ms, &pending.text);
@@ -2654,6 +2703,7 @@ impl Node {
         match &self.store {
             Store::Open(account) => account.undelivered(contact).is_ok_and(|m| !m.is_empty()),
             Store::Sealed(sealed) => sealed.pending.iter().any(|p| p.contact == contact),
+            Store::Provider => false,
         }
     }
 
@@ -2804,6 +2854,7 @@ impl Node {
                 .store_incoming(contact, &id, &text, sent_at_ms)
                 .map_err(|_| ())?
                 .map(|message| Action::MessageReceived { message })),
+            Store::Provider => Err(()),
             Store::Sealed(sealed) => {
                 if sealed.stored.contains(&(contact, id)) {
                     return Ok(None);
@@ -2831,6 +2882,7 @@ impl Node {
                     actions.push(Action::MessageUpdated { message });
                 }
             }
+            Store::Provider => {}
             Store::Sealed(sealed) => {
                 let ours = sealed.pending.iter().position(|p| p.contact == contact && p.id == id);
                 if let Some(index) = ours {
@@ -2917,6 +2969,7 @@ impl Node {
                         .store_incoming_file(contact, &id, &meta, sent_at_ms)
                         .map_err(|_| ())?
                         .map(|message| Action::MessageReceived { message }),
+                    Store::Provider => return Err(()),
                     Store::Sealed(sealed) => {
                         if sealed.stored.contains(&(contact, id)) {
                             None

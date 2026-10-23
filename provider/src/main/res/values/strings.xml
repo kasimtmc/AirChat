@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name" translatable="false">AirChat Provider</string>
+    <string name="explainer">This phone carries other AirChat users\' messages, calls, video and files over Wi-Fi, so the network reaches further. Everything it carries stays encrypted: it cannot read any of it or tell whose it is, and it keeps nothing. Nothing of yours is on it: no account, no contacts.</string>
+    <string name="unsupported">This phone has no Wi-Fi Aware, which a provider needs so that others find it as far as Wi-Fi reaches.</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="stopped">Stopped.</string>
+    <string name="carrying_all">Carrying messages, calls, video and files.</string>
+    <string name="carrying_voice">Battery at %d %%: carrying messages and calls only.</string>
+    <string name="waiting_battery">Battery at %d %%: waiting for the charger.</string>
+    <string name="waiting_hot">Too hot: waiting to cool down.</string>
+    <plurals name="neighbours">
+        <item quantity="one">%d AirChat device nearby</item>
+        <item quantity="other">%d AirChat devices nearby</item>
+    </plurals>
+    <plurals name="paths">
+        <item quantity="one">Carrying %d call or transfer</item>
+        <item quantity="other">Carrying %d calls or transfers</item>
+    </plurals>
+    <string name="keep_charging">Keep it on the charger. It starts again with the phone until you stop it.</string>
+    <string name="channel_running">Running</string>
+    <string name="running_title">AirChat Provider is running</string>
+    <string name="running_text">Carrying encrypted traffic for others.</string>
+</resources>

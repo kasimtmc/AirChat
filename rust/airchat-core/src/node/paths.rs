@@ -656,8 +656,8 @@ impl Node {
             .is_some_and(|keys| keys.group_only || keys.permissions.messages)
     }
 
-    #[cfg(test)]
-    pub(super) fn paths_carried_for_tests(&self) -> usize {
+    /// The paths this device carries for others now, as an Air Provider.
+    pub fn paths_carried(&self) -> usize {
         self.paths.carried.len()
     }
 
@@ -1177,7 +1177,7 @@ mod tests {
             mesh_link(&mut net, provider, CEM);
         }
         find(&mut net, AYSE, CEM, Class::Voice);
-        assert_eq!(net.node(BURAK).paths_carried_for_tests(), 1);
+        assert_eq!(net.node(BURAK).paths_carried(), 1);
         let cem = net.contact(AYSE, CEM);
         let (call, actions) = net.node(AYSE).start_call(cem, false).unwrap();
         net.run(AYSE, actions);
@@ -1200,7 +1200,7 @@ mod tests {
             net.run(at, actions);
         }
         assert!(path_link(&mut net, AYSE, CEM).is_some(), "linked again");
-        assert_eq!(net.node(DENIZ).paths_carried_for_tests(), 1, "through Deniz");
+        assert_eq!(net.node(DENIZ).paths_carried(), 1, "through Deniz");
         assert!(
             !net.devices[AYSE]
                 .shown
@@ -1321,11 +1321,7 @@ mod tests {
         assert_eq!(names(&mut net, CEM), ["Ayşe"]);
         assert!(net.node(CEM).sent_requests().unwrap().is_empty());
         assert!(net.node(BURAK).keys.contacts.is_empty(), "the provider learned no one");
-        assert_eq!(
-            net.node(BURAK).paths_carried_for_tests(),
-            0,
-            "the path closed with the pairing"
-        );
+        assert_eq!(net.node(BURAK).paths_carried(), 0, "the path closed with the pairing");
     }
 
     #[test]

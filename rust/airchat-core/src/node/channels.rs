@@ -743,7 +743,7 @@ mod tests {
         assert_eq!(names(&net, A), ["Burak"]);
         let peer = net.devices[A].node.channel_peers()[0].id;
         assert!(!is_path_connection(net.node(A).links[&peer]), "direct");
-        assert!(net.node(D).paths_carried_for_tests() == 0, "the path closed");
+        assert!(net.node(D).paths_carried() == 0, "the path closed");
         // One cluster: its head looks on for others, and the other, in it, does not answer.
         let (head, other) = if net.node(A).is_channel_head(now_secs()) {
             (A, B)

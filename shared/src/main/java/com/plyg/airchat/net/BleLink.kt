@@ -8,7 +8,7 @@ import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.util.Log
-import com.plyg.airchat.BuildConfig
+import com.plyg.airchat.shared.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch

@@ -2,7 +2,7 @@ package com.plyg.airchat.net
 
 import android.os.SystemClock
 import android.util.Log
-import com.plyg.airchat.BuildConfig
+import com.plyg.airchat.shared.BuildConfig
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

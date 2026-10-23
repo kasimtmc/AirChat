@@ -21,7 +21,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.plyg.airchat.BuildConfig
+import com.plyg.airchat.shared.BuildConfig
 import com.plyg.airchat.core.AwareBeacon
 import com.plyg.airchat.core.awareConnectRequest
 import com.plyg.airchat.core.awareServiceName

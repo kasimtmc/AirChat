@@ -172,12 +172,15 @@ Nobody but the user can read the user's data, during or after transmission.
 - **AP-6** *(2026-10-13: replaced)* Air Providers keep nothing for recipients out of reach: like
   every device they hold what they pass on for a few minutes only, in memory. The sender keeps its
   messages until they are delivered or given up (M-8).
-- **AP-8** *(2026-10-19, planned)* **Provider app.** A separate Android app
+- **AP-8** *(2026-10-19)* **Provider app.** A separate Android app
   (`com.plyg.airchat.provider`, a build of the same code) turns a spare phone with Wi-Fi Aware into
-  an always-on provider. Nothing of a user is on it: no account, contacts or messages, and no code
-  for them. It starts with the phone and stays on while charging; its only keys are its own, in the
-  Android Keystore. Setting it up is installing it, granting the radios and pressing start, with
-  nothing to register. Its screen shows how much it carries, never whom.
+  an always-on provider. Nothing of a user is on it: no account, contacts or messages, and none of
+  the app's code for them (the core library is the same, which keeps one thing to audit). It starts
+  with the phone and carries what AP-5 allows, starting again once charged or cooled. Its keys are
+  made anew in memory every time it starts and stored nowhere, so a provider cannot be followed
+  across restarts and a taken phone holds no key. Setting it up is installing it, granting the
+  radios and pressing start, with nothing to register. Its screen shows how much it carries, never
+  whom.
 - **AP-9** *(2026-10-19)* **No registry.** Providers are not registered, listed, approved or
   named: no Wi-Fi network names that say AirChat, no list of providers in the app or online, no
   sign-up form, no reports about providers leaving a device. A list shipped in the app can be read

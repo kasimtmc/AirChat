@@ -311,6 +311,7 @@ impl Node {
         updates.done(part.update_id);
         match &self.store {
             Store::Open(_) => self.take_update(FROM_MESH, update),
+            Store::Provider => Vec::new(),
             Store::Sealed(sealed) => {
                 let _ = sealed.inbox.append(&InboxEvent::GroupUpdate {
                     contact: FROM_MESH,

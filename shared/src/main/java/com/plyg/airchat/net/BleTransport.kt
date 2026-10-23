@@ -18,7 +18,7 @@ import android.content.Context
 import android.os.ParcelUuid
 import android.os.SystemClock
 import android.util.Log
-import com.plyg.airchat.BuildConfig
+import com.plyg.airchat.shared.BuildConfig
 import com.plyg.airchat.core.BleBeacon
 import com.plyg.airchat.core.bleServiceUuid
 import com.plyg.airchat.core.decodeBleBeacon

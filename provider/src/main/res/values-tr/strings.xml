@@ -1,0 +1,23 @@
+<resources>
+    <string name="explainer">Bu telefon diğer AirChat kullanıcılarının mesajlarını, aramalarını, görüntülerini ve dosyalarını Wi-Fi ile taşır; ağ daha uzağa ulaşır. Taşıdığı her şey şifreli kalır: hiçbirini okuyamaz, kimin olduğunu bilemez ve hiçbir şey saklamaz. Bu telefonda senden hiçbir şey yok: ne hesap ne kişi.</string>
+    <string name="unsupported">Bu telefonda Wi-Fi Aware yok. Sağlayıcı olmak için gerekli: diğerleri onu Wi-Fi\'nin ulaştığı her yerden bulabilsin diye.</string>
+    <string name="start">Başlat</string>
+    <string name="stop">Durdur</string>
+    <string name="stopped">Durduruldu.</string>
+    <string name="carrying_all">Mesajları, aramaları, görüntüyü ve dosyaları taşıyor.</string>
+    <string name="carrying_voice">Pil %%%d: yalnızca mesajları ve aramaları taşıyor.</string>
+    <string name="waiting_battery">Pil %%%d: şarj bekleniyor.</string>
+    <string name="waiting_hot">Çok sıcak: soğuması bekleniyor.</string>
+    <plurals name="neighbours">
+        <item quantity="one">Yakında %d AirChat cihazı</item>
+        <item quantity="other">Yakında %d AirChat cihazı</item>
+    </plurals>
+    <plurals name="paths">
+        <item quantity="one">%d arama ya da aktarım taşınıyor</item>
+        <item quantity="other">%d arama ya da aktarım taşınıyor</item>
+    </plurals>
+    <string name="keep_charging">Şarjda tut. Sen durdurana kadar telefonla birlikte yeniden başlar.</string>
+    <string name="channel_running">Çalışıyor</string>
+    <string name="running_title">AirChat Provider çalışıyor</string>
+    <string name="running_text">Başkaları için şifreli trafik taşınıyor.</string>
+</resources>

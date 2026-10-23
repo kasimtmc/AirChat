@@ -317,6 +317,9 @@ epoch          = floor(unix_time_seconds / 3600)                                
 ```
 
 - A device recognises a contact's token for the epochs `e - 1`, `e`, `e + 1` (clock skew).
+- A provider device (§12) has no contacts. It announces a token under a presence key it makes at
+  random every time it starts and keeps in memory only: nobody recognises it, so every device that
+  sees it opens a mesh link to it (§10.2), and nothing ties it to itself before the restart.
 - Eight bytes fit a BLE advertisement (§7.3). The token only decides whether to connect; the link
   handshake (§6) authenticates the device, so a chance match with a stranger costs one failed
   connection attempt and nothing more.
@@ -1751,6 +1754,9 @@ from a device through one or more providers to one of its contacts, and the two 
 ordinary link (§6) over it, so everything a link carries works through it while providers see only
 that link's ciphertext. Paths carry what the mesh (§10) cannot: calls, push-to-talk, video and files.
 They run over mesh neighbours' links (§10.1); every record below travels on such a link, hop by hop.
+A *provider device* does nothing else: it has no account and no contacts, makes its keys anew in
+memory every time it starts (§5.2), stores nothing, and is the recipient of nothing; on the wire
+it is any device with Air Provider mode on.
 
 ### 12.1 Classes and offers
 

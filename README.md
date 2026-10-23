@@ -64,7 +64,9 @@ cargo install cargo-ndk
 ```
 
 The Rust core is compiled for arm64-v8a, armeabi-v7a and x86_64 as part of the Gradle build. The
-app runs on Android 10 (API 29) and later.
+app runs on Android 10 (API 29) and later. The same build makes the provider app
+(`provider/build/outputs/apk/`), which turns a spare phone with Wi-Fi Aware into an always-on Air
+Provider (requirements AP-8).
 
 ### Release builds
 

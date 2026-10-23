@@ -378,6 +378,7 @@ impl Node {
                 }
                 row
             }
+            Store::Provider => return (Vec::new(), Vec::new()),
             Store::Sealed(sealed) => {
                 if !sealed.stored.contains(&(contact, id)) {
                     let event = InboxEvent::File {

@@ -256,6 +256,13 @@ pub fn unlock_with_secret(
     Account::wrap(account)
 }
 
+/// A provider device's node (requirements AP-8): no account and nothing stored, new keys every
+/// start. Calls about an account fail as [`CoreError::Locked`].
+#[uniffi::export]
+pub fn open_provider() -> Result<Arc<Account>, CoreError> {
+    Ok(Arc::new(Account(Mutex::new(Node::provider()?))))
+}
+
 #[derive(uniffi::Record)]
 pub struct SecretUnlock {
     /// Must be stored only behind biometric authentication, then wiped.
@@ -686,6 +693,14 @@ impl Account {
     }
 
     // Air Provider (rust/airchat-protocol/docs/protocol.md §12).
+
+    /// The paths this device carries for others now.
+    pub fn paths_carried(&self) -> u32 {
+        self.0
+            .lock()
+            .map(|node| u32::try_from(node.paths_carried()).unwrap_or(u32::MAX))
+            .unwrap_or(0)
+    }
 
     /// What this device carries for others now, as Air Provider (requirements AP-1, AP-5); an
     /// empty list turns the mode off and closes the paths it carries.

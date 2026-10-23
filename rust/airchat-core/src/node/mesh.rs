@@ -1052,6 +1052,7 @@ impl Node {
                         .map(|m| (super::outgoing_record(m), sent_minute(m.tried_at_ms)))
                         .collect()
                 }
+                Store::Provider => Vec::new(),
                 Store::Sealed(sealed) => sealed
                     .pending
                     .iter()
@@ -1447,6 +1448,65 @@ pub(super) mod tests {
             [("sonra gelirsen".into(), MessageStatus::Received)]
         );
         assert_eq!(statuses(&net, AYSE, CEM)[0].1, MessageStatus::Delivered);
+    }
+
+    #[test]
+    fn a_provider_device_carries_messages_and_paths_and_keeps_nothing() {
+        use crate::path::{Class, Classes};
+        // Burak is a provider device (requirements AP-8): no account, new keys in memory.
+        let mut net = bridge();
+        net.devices[BURAK].node = Node::provider().unwrap();
+        let burak_dir = tempfile::tempdir().unwrap();
+        net.devices[BURAK].dir = burak_dir;
+        let actions = net.node(BURAK).set_air_provider(Classes::from_bits(0x07));
+        net.run(BURAK, actions);
+        mesh_link(&mut net, AYSE, BURAK);
+        mesh_link(&mut net, BURAK, CEM);
+        let cem = net.contact(AYSE, CEM);
+
+        // A message through the mesh, and its acknowledgement back.
+        let (_, actions) = net.node(AYSE).send_message(cem, "sağlayıcıdan").unwrap();
+        net.run(AYSE, actions);
+        assert_eq!(
+            statuses(&net, CEM, AYSE),
+            [("sağlayıcıdan".into(), MessageStatus::Received)]
+        );
+        assert_eq!(statuses(&net, AYSE, CEM)[0].1, MessageStatus::Delivered);
+        assert!(!net.node(BURAK).mesh.seen.is_empty(), "it went through Burak");
+        assert_eq!(
+            net.node(BURAK).mesh.held_count(),
+            0,
+            "and once delivered, was withdrawn there"
+        );
+
+        // A path for a call, and a message over the link on it.
+        let actions = net.node(AYSE).find_path(cem, Class::Voice).unwrap();
+        net.run(AYSE, actions);
+        assert_eq!(net.node(BURAK).paths_carried(), 1);
+        assert!(
+            net.node(AYSE)
+                .links
+                .get(&cem)
+                .is_some_and(|c| super::super::is_path_connection(*c)),
+            "linked over the path"
+        );
+        let (_, actions) = net.node(AYSE).send_message(cem, "yoldan").unwrap();
+        net.run(AYSE, actions);
+        assert_eq!(statuses(&net, CEM, AYSE)[1], ("yoldan".into(), MessageStatus::Received));
+
+        // The provider learned no one, showed nothing, can open nothing and wrote nothing.
+        let provider = net.node(BURAK);
+        assert!(provider.is_provider() && provider.account().is_err());
+        assert!(provider.keys.contacts.is_empty() && provider.keys.groups.is_empty());
+        let shown = &net.devices[BURAK].shown;
+        assert!(
+            shown
+                .iter()
+                .all(|a| matches!(a, Action::LinkUp { .. } | Action::LinkDown { .. })),
+            "nothing for the platform to show but its mesh links: {shown:?}"
+        );
+        let written = std::fs::read_dir(net.devices[BURAK].dir.path()).unwrap().count();
+        assert_eq!(written, 0);
     }
 
     #[test]

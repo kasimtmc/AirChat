@@ -30,7 +30,9 @@ and plaintext only leaves the core to be shown on screen or played back.
 
 ```
 AirChat/
-├── app/            Android app: Compose UI, platform services, transports
+├── app/            Android app: Compose UI, platform services
+├── provider/       The provider app (requirements AP-8): a spare phone as an always-on Air Provider
+├── shared/         Android library both apps use: transports, Air Provider mode
 ├── core-bridge/    Android library: builds the Rust core for Android and exposes it to Kotlin
 ├── rust/           Cargo workspace, platform-independent
 │   ├── airchat-protocol/ The protocol: formats and crypto (also kasimtmc/airchat-protocol)
@@ -400,7 +402,7 @@ unreliable datagram path for real-time audio/video on transports that offer one.
 
 - **Discovery** runs on BLE: low-power advertising with rotating identifiers (`S-8`).
 
-Implemented so far (Android, `app/src/main/java/com/plyg/airchat/net/`):
+Implemented so far (Android, `shared/src/main/java/com/plyg/airchat/net/`, used by both apps):
 
 | Transport | Finds devices with | Connects with | Notes |
 |---|---|---|---|
@@ -672,13 +674,15 @@ Implemented so far (Android, `app/src/main/java/com/plyg/airchat/net/`):
   for members of other clusters through providers every 30 s (tagged with a key every member holds,
   the nonce naming its head so its own cluster stays silent), so separate clusters join into one.
   A direct channel link replaces one over a path.
-- **Provider devices** (requirements AP-1, AP-8 to AP-11; planned, 2026-10-19). The provider app
-  is a build of this code with the account, contacts and conversations left out, and the node in a
-  provider-only mode: mesh links, paths and the backbone between providers (AP-2), nothing else. It
-  is found over Wi-Fi Aware (or a shared network, §7.2), never through a Wi-Fi network of its own,
-  so it needs a phone with Wi-Fi Aware; others reach it through the mesh. It stores nothing of anyone:
-  what it passes on stays in memory as on every device (10 minutes, 8 MiB), and its keys are its
-  own, in the Keystore, with no PIN since there is nothing of a user to protect. Plan, each step
+- **Provider devices** (requirements AP-1, AP-8 to AP-11; 2026-10-19). The provider app
+  (`provider/`) is a build of this code with the account, contacts and conversations left out: it
+  shares the transports and Air Provider mode with the app (`shared/`) and the core library, and
+  its node is a provider's (`Node::provider`, `open_provider` over FFI): no account, keys made anew
+  in memory at every start (protocol §5.2, §12), mesh links, paths and the backbone between
+  providers (AP-2), nothing else. It is found over Wi-Fi Aware (or a shared network, §7.2), never
+  through a Wi-Fi network of its own, so it needs a phone with Wi-Fi Aware; others reach it through
+  the mesh. It stores nothing of anyone: what it passes on stays in memory as on every device
+  (10 minutes, 8 MiB), and its only file holds whether the user started it. Plan, each step
   released only past its gate:
   1. Documents (this). Gate: no provider gains anything it can read or change.
   2. The Wi-Fi check (AP-10). Gate: nothing about the network leaves the device; mDNS names stay
@@ -689,7 +693,12 @@ Implemented so far (Android, `app/src/main/java/com/plyg/airchat/net/`):
   3. The provider app (AP-8). Gate: a test shows no envelope, message or contact in the provider's
      storage after it carried traffic, and its beacons are those of any phone. (The Air Provider
      switch already needs Wi-Fi Aware, AP-1: `runtime/AirProvider` checks the system feature, and
-     the settings say why when it is missing.)
+     the settings say why when it is missing.) Done: a provider node carries a message through the
+     mesh and a link over a path between two accounts, learns no one, shows the platform nothing
+     but its mesh links and writes no file (`node/mesh.rs` tests); on a phone (2026-10-23), after it
+     carried a message and a call between two others, its data directory held its settings (started,
+     mode on) and Android's profile marker, nothing else. Its beacon is a presence token like any other,
+     under a random key.
   4. Before release: a Tamarin model of paths (§12), long fuzzing of what reaches a provider, abuse
      limits (AP-3), and the provider app in the audit's scope.
   5. Linux providers once Wi-Fi Aware is common there (AP-11).
@@ -709,8 +718,8 @@ through providers was dropped on 2026-10-13: senders keep their messages, M-8.) 
   of the contact link handshake, pairing, group keys and mesh envelopes
   (`rust/airchat-protocol/formal/`) and hours of fuzzing of every target are done; an independent
   audit remains.
-- **Air Provider app** (AP-8, AP-9): spare phones with Wi-Fi Aware as always-on providers, with
-  no registry (§7, provider devices). The Wi-Fi check before it (AP-10) is done.
+- **Air Provider app** (AP-8 to AP-10): built; before its release, a Tamarin model of paths, long
+  fuzzing of what reaches a provider, abuse limits and an audit (§7, provider devices).
 - **Wi-Fi Aware end to end:** needs a second phone that has it.
 - **Releases:** reproducible builds, a store or other way to distribute beyond GitHub releases.
 - **iOS and Linux (P-2):** platform code over the same Rust core.

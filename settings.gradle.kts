@@ -25,3 +25,5 @@ dependencyResolutionManagement {
 rootProject.name = "Air Chat"
 include(":app")
 include(":core-bridge")
+include(":shared")
+include(":provider")

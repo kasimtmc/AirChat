@@ -203,6 +203,7 @@ impl Node {
             Store::Open(account) => {
                 let _ = account.db().delete_own_prekey(contact, prekey);
             }
+            Store::Provider => {}
             Store::Sealed(sealed) => {
                 let _ = sealed.inbox.append(&InboxEvent::PrekeyUsed { contact, prekey });
             }
@@ -236,6 +237,7 @@ impl Node {
                     .map(|m| m.message_id)
             }
             // Files are answered after the unlock.
+            Store::Provider => None,
             Store::Sealed(sealed) => sealed
                 .stored
                 .iter()
