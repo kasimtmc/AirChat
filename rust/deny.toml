@@ -6,6 +6,7 @@
 # RustSec advisories, unmaintained crates included, fail the check unless listed here with a reason.
 ignore = [
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2, unmaintained: a build-time macro of hax-lib, libcrux's verification annotations; none of it ships. Goes when libcrux moves off it." },
+    { id = "RUSTSEC-2026-0374", reason = "basic-toml, unmaintained: read at build time by askama's template macro, which UniFFI's binding generator uses; none of it ships. Goes when askama moves off it." },
 ]
 
 [licenses]
