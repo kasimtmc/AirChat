@@ -1091,10 +1091,12 @@ content = 0x01 || text (UTF-8, 1–8192 bytes)
                                                                              only, §16.3)
         | 0x06                                                               leaving (AirChat+ only,
                                                                              §16.3)
+        | 0x07 || relay invite (66, as §15.1's 0x62 after its kind)          a room for a group
+                                                                             file (AirChat+ only,
+                                                                             §16.4)
 ```
 
-A device without AirChat+ acknowledges a message whose content is `0x04`, `0x05` or `0x06` and
-ignores it.
+A device without AirChat+ acknowledges a message whose content is `0x04` to `0x07` and ignores it.
 
 A device stores a group message once (by `group_id` and `message_id`) when the sender is a member of
 that epoch, the signature verifies and it decrypts. Messages of an epoch the device does not hold
@@ -2375,12 +2377,47 @@ record     = a group message (0x41) or an update part (0x40), each as on a link 
   waits, §14.5) is shown as not delivered.
 - **Leaving.** A member that leaves sends every member a group message whose content is *leaving*
   (`0x06`) and drops the group; members show it, and an admin removes the sender with a new epoch.
+- **Deleting.** An admin's *deleted* (`0x03`, §9.2) goes to every member in group mail. A member
+  remembers a deleted group for 30 days, not a day, since an update of it may wait at its server
+  that long.
+- **Two updates of one epoch** (§9.2) are settled as on links. A device that takes the other update
+  seals its own messages of that epoch afresh, queues them again, and tells its delivery key in the
+  epoch again; the admin whose update was set aside makes its change again in the next epoch.
+- **Mail that does not open yet.** Group mail whose tag matches no epoch the device holds is kept
+  for a day (at most 256 pieces) and tried again whenever the device takes an update: it may be of
+  an epoch whose update is still on its way, or of the other update of an epoch.
 - A member whose `dk_G` the sender does not know yet gets nothing until it does: its first group
   message tells everyone.
 - Flooding (§9.5) does not apply: every sender deposits for every member itself, but for the
   delivery keys an admin passes on (§16.2).
 
-### 16.4 Test vectors
+### 16.4 Group files
+
+A file sent to a group goes like a file between two (§15.3), member by member: the file message
+(content `0x02`, §9.3) to everyone in group mail, its content over relay rooms, never stored at a
+server, for **three hours** after the message.
+
+- **Rooms.** A room for a group file is one of two, the sender and one member. Whoever opens it
+  tells the other in a group message to that member alone whose content is a relay invite (`0x07`:
+  purpose file, `size` 2, `reference` the file message's `message_id`), and waits in it. The other
+  joins at once if the file is one it should send or fetch.
+- **Small files, to everyone.** For a file of at most 5 MiB (5 242 880 bytes) the sender opens a room
+  for each member, waiting what is left of the three hours, and each member's device joins as soon
+  as it gets the invite and fetches the file.
+- **Larger files, when asked.** A member's device fetches a larger file only when its user asks: it
+  opens a room, waiting 5 minutes, and invites the sender, which joins if the three hours have not
+  passed and it holds the file whole. A sender that does not come leaves the file to be asked for
+  again.
+- **The link.** In the room the two run a link (§6) as members, with the group link key `link_psk`
+  of §9.4 for the file message's epoch and each other's identity and static keys from that epoch's
+  roster, whether they are contacts or not; whoever opened the room initiates. Over it the fetcher
+  asks for the file's chunks by the message's `message_id` and checks the whole file against
+  `sha256`, and acknowledges it, as in §8.4. A device serves a group file only to a member of the
+  group in the message's epoch, and only the file of that message.
+- After three hours the sender serves the file no more; a member that does not have it shows it as
+  no longer available.
+
+### 16.5 Test vectors
 
 `tests/vectors/group_mail.json` holds a piece of group mail carrying a group message whose
 content is the sender's group delivery key, with its tag key, tag, key and padding;
