@@ -300,6 +300,14 @@ pub enum Action {
     },
     /// The first frame of a mailbox connection (§14.6).
     OpenMailbox,
+    /// The hash of one more delivery key, a group's (§16.2).
+    AddDeliveryKey {
+        hash: [u8; 32],
+    },
+    /// Takes back a key [`Action::AddDeliveryKey`] added.
+    RemoveDeliveryKey {
+        hash: [u8; 32],
+    },
 }
 
 /// `0x77 authorized` (§13.6). The server knows the identity key the token is bound to and checks
@@ -364,6 +372,14 @@ impl Authorized {
                 out.extend_from_slice(hash);
             }
             Action::OpenMailbox => out.push(6),
+            Action::AddDeliveryKey { hash } => {
+                out.push(7);
+                out.extend_from_slice(hash);
+            }
+            Action::RemoveDeliveryKey { hash } => {
+                out.push(8);
+                out.extend_from_slice(hash);
+            }
         }
         out
     }
@@ -486,6 +502,8 @@ impl Request {
                     ),
                     5 => Action::SetDeliveryKey { hash: reader.array()? },
                     6 => Action::OpenMailbox,
+                    7 => Action::AddDeliveryKey { hash: reader.array()? },
+                    8 => Action::RemoveDeliveryKey { hash: reader.array()? },
                     _ => return Err(AccountError::Malformed),
                 },
                 signature: reader.array()?,
@@ -863,6 +881,10 @@ mod tests {
                 auth_key: rekey(6).auth_key,
                 new: rekey(7),
             },
+            Action::SetDeliveryKey { hash: [10; 32] },
+            Action::OpenMailbox,
+            Action::AddDeliveryKey { hash: [11; 32] },
+            Action::RemoveDeliveryKey { hash: [12; 32] },
         ] {
             let authorized = Authorized::new(&me, "a.org", rekey(8).auth_key, [9; 32], action).unwrap();
             let Request::Authorized(decoded) = round_trip(&Request::Authorized(authorized)) else {

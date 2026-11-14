@@ -334,11 +334,14 @@ pub enum Content {
     File(FileMeta),
     /// An admin deleted the group, for every member (§9.2).
     Deleted,
+    /// The sender's delivery key for this group, with which members leave it group mail (§16.2).
+    DeliveryKey(Zeroizing<[u8; 32]>),
 }
 
 const CONTENT_TEXT: u8 = 0x01;
 const CONTENT_FILE: u8 = 0x02;
 const CONTENT_DELETED: u8 = 0x03;
+const CONTENT_DELIVERY_KEY: u8 = 0x04;
 
 impl Content {
     pub(crate) fn encode(&self) -> Result<Zeroizing<Vec<u8>>, GroupError> {
@@ -355,6 +358,7 @@ impl Content {
             ]
             .concat(),
             Self::Deleted => vec![CONTENT_DELETED],
+            Self::DeliveryKey(key) => [&[CONTENT_DELIVERY_KEY][..], &key[..]].concat(),
         }))
     }
 
@@ -369,6 +373,9 @@ impl Content {
             }
             Some((&CONTENT_FILE, file)) => Ok(Self::File(chat::decode_file(file).map_err(|_| GroupError::Malformed)?)),
             Some((&CONTENT_DELETED, [])) => Ok(Self::Deleted),
+            Some((&CONTENT_DELIVERY_KEY, key)) => Ok(Self::DeliveryKey(Zeroizing::new(
+                key.try_into().map_err(|_| GroupError::Malformed)?,
+            ))),
             _ => Err(GroupError::Malformed),
         }
     }
@@ -719,6 +726,13 @@ pub(crate) mod tests {
         );
         assert_eq!(Content::decode(&[0x03]).unwrap(), Content::Deleted);
         assert!(Content::decode(&[0x03, 0]).is_err());
+
+        // A group delivery key (§16.2): exactly 32 bytes.
+        let dk = Content::DeliveryKey(Zeroizing::new([0x5e; 32]));
+        let sealed = seal_message(&[3; 16], 4, &key, &[9; 16], &ayse.identity, 4_000, &dk).unwrap();
+        assert_eq!(Message::read(&sealed).unwrap().open(&key).unwrap(), (4_000, dk));
+        assert!(Content::decode(&[&[0x04][..], &[0; 31]].concat()).is_err());
+        assert!(Content::decode(&[&[0x04][..], &[0; 33]].concat()).is_err());
     }
 
     #[test]

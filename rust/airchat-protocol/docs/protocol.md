@@ -1085,7 +1085,11 @@ content = 0x01 || text (UTF-8, 1–8192 bytes)
           fields as in a file offer (§8.4)
         | 0x03                                                               the group is deleted
                                                                              (an admin only, §9.2)
+        | 0x04 || dk (32)                                                    a group delivery key
+                                                                             (AirChat+ only, §16.2)
 ```
+
+A device without AirChat+ acknowledges a message whose content is `0x04` and ignores it.
 
 A device stores a group message once (by `group_id` and `message_id`) when the sender is a member of
 that epoch, the signature verifies and it decrypts. Messages of an epoch the device does not hold
@@ -1974,6 +1978,8 @@ kind 3  change password:  body = auth_key (32) || salt (16) || params (9) || new
 kind 4  publish static key:  body = version (u32) || SK.pk (1216) || signature (64)       §14.1
 kind 5  set delivery key:    body = SHA-256("AirChat v1 mail-delivery-key" || dk) (32)    §14.4
 kind 6  open mailbox:        body empty; only as the first frame of a mailbox connection  §14.6
+kind 7  add delivery key:    body = SHA-256("AirChat v1 mail-delivery-key" || dk) (32)    §16.2
+kind 8  remove delivery key: body = the same hash (32)                                   §16.2
 ```
 
 `nonce` is a fresh challenge (§13.5): every request on a session proves both the token and the
@@ -2125,7 +2131,8 @@ payload  = a §8.1 record of a kind below
   (§14.5). §6.9's 25 hours are for mesh envelopes, which live a day.
 - **Kinds.** A payload is one of: text `0x01`, ack `0x02`, refused `0x05` (§8.1); file offer
   `0x20` (§8.4; its content goes over a relay, §15.3); prekeys `0x5a` and prekeys wanted `0x5b`
-  (§14.7); static key `0x5c` and static key taken `0x5d` (§6.9); relay invite `0x62` (§15.1); and
+  (§14.7); static key `0x5c` and static key taken `0x5d` (§6.9); relay invite `0x62` (§15.1);
+  update part `0x40` (§16.3, from the admin adding the recipient to a group); and
 
   ```
   0x61 delivery key:  dk (32)        the sender's new delivery key (§14.4)
@@ -2283,4 +2290,80 @@ The relay is only a transport (§7): what runs over it is protected end to end.
 
 `tests/vectors/relay.json` holds a relay invite and the join, ready and failure frames;
 `check_relay.py` encodes them again from this section.
+
+## 16. Groups by mail
+
+AirChat+ groups are AirChat's (§9): epochs, signed updates, rosters, admins, group messages sealed
+once under the epoch key. What changes is how they travel: as mail (§14), deposited by the sender
+at each member's server, since members need not be contacts of each other and never meet. Servers
+learn nothing of groups: not who is in one, nor that a piece of mail belongs to one.
+
+### 16.1 Rosters
+
+A roster (§9.1) is unchanged on the wire; two of a member's fields carry what mail needs:
+
+- `name` is the member's address, `name@server` (§13.1), so at most 64 characters: a member whose
+  address is longer cannot be in a group until this changes with federation.
+- `presence_key` (there are no beacons over the internet) is the member's **group delivery key**
+  `dk_G` (§16.2) for this group, or 32 zero bytes while the admin does not know it.
+
+### 16.2 Group delivery keys
+
+Each member makes a delivery key of its own for each group it is in, so that only the group's
+members can leave its group mail (C-5), and so that someone removed loses that right in that group
+alone:
+
+- An account may hold several delivery keys at its server: the one of §14.4 (kind 5 replaces it)
+  and up to 64 more, added and removed on its session (§13.6, kinds 7 and 8). A deposit (§14.5)
+  may show any of them.
+- A member adds `dk_G` at its server when it joins (it accepts the update that adds it), and tells
+  the group in a group message whose content is
+  ```
+  0x04 delivery key:  dk (32)        the sender's group delivery key (§16.2)
+  ```
+  Members take it from the message and admins put it in later rosters.
+- When an epoch removes someone, every remaining member makes a new `dk_G`, adds it, tells the
+  group, and removes the old one an hour later (mail still on its way may show it).
+- The server sees how many keys an account holds, and which of them a deposit shows: it can tell
+  that two deposits for an account were for the same group, never which group nor who is in it.
+
+### 16.3 Group mail
+
+What goes to the members of a group goes as *group mail*, one piece per member, each deposited at
+that member's server with that member's `dk_G`:
+
+```
+group mail = tag (32) || ChaCha20-Poly1305(key, nonce = 12 zero bytes, aad = "", padded)
+tag_key    = HKDF(salt = "", ikm = epoch_key, info = "AirChat v1 mail-group-tag-key" || group_id || epoch (u64))
+tag        = nonce (16 random bytes) || HMAC-SHA-256(tag_key, "AirChat v1 mail-tag-mac" || nonce)[0..16]
+key        = HKDF(salt = "", ikm = epoch_key, info = "AirChat v1 mail-group-seal" || group_id || epoch (u64) || tag)
+padded     = len (u16) || record || zeros, making the mail exactly 2048, 4096 or 16384 bytes
+record     = a group message (0x41), a group ack (0x42), a group leave (0x43) or an update part (0x40),
+             each as on a link (§9.3, §9.5)
+```
+
+- `epoch_key` is the key of the epoch the record belongs to; for an update part, of the epoch
+  before the update. A recipient checks the tag against the tag key of every epoch it holds of
+  every group, as it checks contacts' tags (§14.3). The server sees a fresh tag every time; it
+  can tell group mail from a contact's by the delivery key shown (and by the bytes where a
+  contact's mail names its prekey), and one group's from another's by their keys, but not which
+  group, who sent it, nor what it carries.
+- The record inside is what §9 makes it, sealed and signed by its sender as on a link; the outer
+  seal hides from the server who sent it and to which group, which the record shows in clear.
+- **Updates.** An update goes in parts (§9.5) of at most 15000 bytes of data each, so a part fits
+  in the largest mail of either kind. Members of the previous epoch get it as group mail under that epoch's key;
+  a member being added, which holds no key yet, gets it in mail from the admin, who is its contact
+  (§9.2): parts `0x40` are a kind contact mail may carry (§14.3).
+- **Acknowledgements.** A member that stores a group message answers its sender alone with a group
+  ack (`0x42`) in group mail; the sender shows who has it. A message no member took within 30 days
+  (the most mail waits, §14.5) is shown as not delivered.
+- A member whose `dk_G` the sender does not know yet gets nothing until it does: its first group
+  message tells everyone.
+- Flooding (§9.5) does not apply: every sender deposits for every member itself.
+
+### 16.4 Test vectors
+
+`tests/vectors/group_mail.json` holds a piece of group mail carrying a group message whose
+content is the sender's group delivery key, with its tag key, tag, key and padding;
+`check_group_mail.py` re-derives them from this section and §9.3.
 

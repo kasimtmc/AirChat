@@ -147,6 +147,10 @@ The models' headers list their abstractions. In short:
   which gives the adversary more than honest devices do.
 - `mesh.spthy` leaves out tags, drops, hops and passing on, which carry no secret, and group
   envelopes, which are group messages (`group.spthy`).
+- Group mail (§16.3) is not modelled apart: what it carries is group messages, updates and acks,
+  each protected as on a link (`group.spthy`); its outer layer, under the same epoch key, only
+  hides them from servers. Group delivery keys (§16.2) are, like the contact one, a right to leave
+  mail, not a secret anything else rests on.
 - The emoji are compared as whole hashes. That five emoji (30 bits) suffice, thanks to the
   commitment in message 2, is a matter of probability, outside a symbolic model.
 - Identity hiding and unlinkability (§6.5) are privacy properties, which need observational

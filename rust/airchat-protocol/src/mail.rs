@@ -6,7 +6,10 @@
 //! ```text
 //! request = v_B (u32) || ct_1 (1120) || ChaCha20-Poly1305(k_1, padded card of the requester)   4096 bytes
 //! mail    = tag (32) || field (u32) || ct (1120) || ChaCha20-Poly1305(key, padded payload)    2048, 4096 or 16384 bytes
+//! group   = tag (32) || ChaCha20-Poly1305(key, padded record)                                 2048, 4096 or 16384 bytes
 //! ```
+//!
+//! Group mail (§16.3) is sealed under a group's epoch key, for each member alike.
 
 use zeroize::Zeroizing;
 
@@ -21,6 +24,7 @@ use crate::{
         random::{OsRng, Rng},
         sign::{SIGNATURE_LEN, Signature},
     },
+    group::GroupId,
     identity::{Identity, PublicIdentity},
     labels,
 };
@@ -43,6 +47,9 @@ const MAIL_HEADER_LEN: usize = TAG_LEN + 4 + CIPHERTEXT_LEN;
 const REQUEST_HEADER_LEN: usize = 4 + CIPHERTEXT_LEN;
 /// The largest payload: that of the largest mail.
 pub const MAX_PAYLOAD: usize = MAIL_SIZES[2] - MAIL_HEADER_LEN - aead::TAG_LEN - 2;
+/// The most update data a part carries in mail, so that it fits in the largest mail of either kind
+/// (§16.3); on a link a part carries more ([`crate::chat::UPDATE_PART_LEN`]).
+pub const MAIL_PART_LEN: usize = 15_000;
 const ZERO_NONCE: [u8; 12] = [0; 12];
 
 const MAIL_FRAME: u8 = 0x90;
@@ -399,6 +406,64 @@ pub fn open(pair: &Pair, own: &DecapsulationKey, mail: &[u8]) -> Result<Zeroizin
     Ok(Zeroizing::new(unpad(&padded)?.to_vec()))
 }
 
+/// The key a group's mail tags are made with in `epoch` (§16.3); [`tag_matches`] checks them.
+pub fn group_tag_key(
+    epoch_key: &SecretBytes<32>,
+    group_id: &GroupId,
+    epoch: u64,
+) -> Result<SecretBytes<32>, MailError> {
+    Ok(kdf::derive(
+        b"",
+        epoch_key.expose(),
+        &[labels::MAIL_GROUP_TAG_KEY, group_id, &epoch.to_be_bytes()].concat(),
+    )?)
+}
+
+/// Seals a group record (§16.3) for one member of `group_id`, under the key of `epoch`; padded to
+/// a size of [`MAIL_SIZES`]. Every member gets a piece of its own, with a fresh tag.
+pub fn seal_group(
+    epoch_key: &SecretBytes<32>,
+    group_id: &GroupId,
+    epoch: u64,
+    record: &[u8],
+) -> Result<Vec<u8>, MailError> {
+    seal_group_from(epoch_key, group_id, epoch, record, &mut OsRng)
+}
+
+pub(crate) fn seal_group_from(
+    epoch_key: &SecretBytes<32>,
+    group_id: &GroupId,
+    epoch: u64,
+    record: &[u8],
+    rng: &mut dyn Rng,
+) -> Result<Vec<u8>, MailError> {
+    let tag = new_tag(&group_tag_key(epoch_key, group_id, epoch)?, rng)?;
+    let key = group_seal_key(epoch_key, group_id, epoch, &tag)?;
+    let size = MAIL_SIZES
+        .into_iter()
+        .find(|size| record.len() + 2 <= size - TAG_LEN - aead::TAG_LEN)
+        .ok_or(MailError::TooLong)?;
+    let padded = pad(record, size - TAG_LEN - aead::TAG_LEN)?;
+    let sealed = ChaCha20Poly1305::seal(&key, &ZERO_NONCE, &[], &padded)?;
+    Ok([&tag[..], &sealed].concat())
+}
+
+/// Opens group mail whose tag matched the tag key of `epoch`: the record.
+pub fn open_group(
+    epoch_key: &SecretBytes<32>,
+    group_id: &GroupId,
+    epoch: u64,
+    mail: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, MailError> {
+    if !MAIL_SIZES.contains(&mail.len()) {
+        return Err(MailError::Malformed);
+    }
+    let (tag, sealed) = mail.split_first_chunk::<TAG_LEN>().expect("length checked");
+    let key = group_seal_key(epoch_key, group_id, epoch, tag)?;
+    let padded = ChaCha20Poly1305::open(&key, &ZERO_NONCE, &[], sealed).map_err(|_| MailError::DoesNotOpen)?;
+    Ok(Zeroizing::new(unpad(&padded)?.to_vec()))
+}
+
 /// What a server keeps of a delivery key (§14.4).
 pub fn delivery_key_hash(delivery_key: &SecretBytes<DELIVERY_KEY_LEN>) -> [u8; 32] {
     sha256(&[labels::MAIL_DELIVERY_KEY, delivery_key.expose()])
@@ -558,6 +623,16 @@ fn seal_key(
     ]
     .concat();
     kdf::derive(pair.psk.expose(), secret.expose(), &info)
+}
+
+fn group_seal_key(
+    epoch_key: &SecretBytes<32>,
+    group_id: &GroupId,
+    epoch: u64,
+    tag: &[u8; TAG_LEN],
+) -> Result<SecretBytes<32>, CryptoError> {
+    let info = [labels::MAIL_GROUP_SEAL, group_id, &epoch.to_be_bytes(), tag].concat();
+    kdf::derive(b"", epoch_key.expose(), &info)
 }
 
 fn tag_mac(tag_key: &SecretBytes<32>, nonce: &[u8]) -> [u8; NONCE_HALF] {
@@ -894,6 +969,110 @@ mod tests {
             ),
             Err(MailError::TooLong)
         );
+    }
+
+    #[test]
+    fn group_mail() {
+        let epoch_key = SecretBytes::from_slice(&[0x5a; 32]).unwrap();
+        let ack = ChatMessage::GroupAck {
+            group_id: [1; 16],
+            message_id: [2; 16],
+        }
+        .encode()
+        .unwrap();
+        let mail = seal_group(&epoch_key, &[1; 16], 3, &ack).unwrap();
+        assert_eq!(mail.len(), MAIL_SIZES[0]);
+        assert!(tag_matches(&group_tag_key(&epoch_key, &[1; 16], 3).unwrap(), &mail));
+        assert_eq!(&open_group(&epoch_key, &[1; 16], 3, &mail).unwrap()[..], &ack[..]);
+        // Bound to the group and the epoch, and to the key.
+        for (group_id, epoch) in [([9; 16], 3), ([1; 16], 4)] {
+            assert!(!tag_matches(
+                &group_tag_key(&epoch_key, &group_id, epoch).unwrap(),
+                &mail
+            ));
+            assert!(open_group(&epoch_key, &group_id, epoch, &mail).is_err());
+        }
+        let other = SecretBytes::from_slice(&[0x5b; 32]).unwrap();
+        assert!(!tag_matches(&group_tag_key(&other, &[1; 16], 3).unwrap(), &mail));
+        assert!(open_group(&other, &[1; 16], 3, &mail).is_err());
+        // Each piece has a tag of its own.
+        let again = seal_group(&epoch_key, &[1; 16], 3, &ack).unwrap();
+        assert_ne!(mail[..TAG_LEN], again[..TAG_LEN]);
+        // The largest update part in mail fits both kinds of mail.
+        let part = ChatMessage::UpdatePart {
+            update_id: [3; 16],
+            index: 0,
+            count: 1,
+            data: vec![4; MAIL_PART_LEN],
+        }
+        .encode()
+        .unwrap();
+        assert!(part.len() <= MAX_PAYLOAD);
+        let mail = seal_group(&epoch_key, &[1; 16], 3, &part).unwrap();
+        assert_eq!(mail.len(), MAIL_SIZES[2]);
+        assert_eq!(&open_group(&epoch_key, &[1; 16], 3, &mail).unwrap()[..], &part[..]);
+        let room = MAIL_SIZES[2] - TAG_LEN - aead::TAG_LEN - 2;
+        assert!(seal_group(&epoch_key, &[1; 16], 3, &vec![1; room]).is_ok());
+        assert_eq!(
+            seal_group(&epoch_key, &[1; 16], 3, &vec![1; room + 1]),
+            Err(MailError::TooLong)
+        );
+    }
+
+    /// `tests/vectors/group_mail.json`; `check_group_mail.py` re-derives it from §16.
+    #[test]
+    fn published_group_mail_vector() {
+        use crate::{
+            crypto::test_util::{DeterministicRng, check_vector, to_hex},
+            group::{Content, seal_message_from},
+        };
+        let epoch_key = SecretBytes::from_slice(&[0x51; 32]).unwrap();
+        let (group_id, epoch) = ([0x67; 16], 5);
+        let sender = Identity::from_seed(SecretBytes::from_slice(&[2; 32]).unwrap());
+        let dk = Zeroizing::new([0x5e; 32]);
+        let message = seal_message_from(
+            &group_id,
+            epoch,
+            &epoch_key,
+            &[0x14; 16],
+            &sender,
+            1_791_400_180_000,
+            &Content::DeliveryKey(dk.clone()),
+            &mut DeterministicRng::new([0x31; 32]),
+        )
+        .unwrap();
+        let record = ChatMessage::GroupMessage(message).encode().unwrap();
+        let mail = seal_group_from(
+            &epoch_key,
+            &group_id,
+            epoch,
+            &record,
+            &mut DeterministicRng::new([0x32; 32]),
+        )
+        .unwrap();
+        assert_eq!(
+            &open_group(&epoch_key, &group_id, epoch, &mail).unwrap()[..],
+            &record[..]
+        );
+        let tag_key = group_tag_key(&epoch_key, &group_id, epoch).unwrap();
+        assert!(tag_matches(&tag_key, &mail));
+        let tag: [u8; TAG_LEN] = mail[..TAG_LEN].try_into().unwrap();
+        let key = group_seal_key(&epoch_key, &group_id, epoch, &tag).unwrap();
+        let fields = [
+            ("epoch_key", to_hex(epoch_key.expose())),
+            ("group_id", to_hex(&group_id)),
+            ("epoch", epoch.to_string()),
+            ("sender_seed", to_hex(&[2; 32])),
+            ("delivery_key", to_hex(&dk[..])),
+            ("message_rng_seed", to_hex(&[0x31; 32])),
+            ("record", to_hex(&record)),
+            ("tag_rng_seed", to_hex(&[0x32; 32])),
+            ("tag_key", to_hex(tag_key.expose())),
+            ("tag", to_hex(&tag)),
+            ("key", to_hex(key.expose())),
+            ("mail", to_hex(&mail)),
+        ];
+        check_vector("group_mail", &fields);
     }
 
     #[test]

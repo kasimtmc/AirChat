@@ -149,3 +149,9 @@ name = "relay_frames"
 path = "fuzz_targets/relay_frames.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "group_mail_sealed"
+path = "fuzz_targets/group_mail_sealed.rs"
+test = false
+doc = false

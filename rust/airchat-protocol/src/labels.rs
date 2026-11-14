@@ -155,6 +155,10 @@ pub const MAIL_TAG: &[u8] = b"AirChat v1 mail-tag-mac";
 pub const MAIL_SEAL: &[u8] = b"AirChat v1 mail-seal";
 /// Hash input of a delivery key, as a server keeps it (§14.4).
 pub const MAIL_DELIVERY_KEY: &[u8] = b"AirChat v1 mail-delivery-key";
+/// Tag key of a group's mail in one epoch (§16.3).
+pub const MAIL_GROUP_TAG_KEY: &[u8] = b"AirChat v1 mail-group-tag-key";
+/// Key of a piece of group mail (§16.3).
+pub const MAIL_GROUP_SEAL: &[u8] = b"AirChat v1 mail-group-seal";
 
 #[cfg(test)]
 mod tests {
@@ -211,6 +215,8 @@ mod tests {
         MAIL_TAG,
         MAIL_SEAL,
         MAIL_DELIVERY_KEY,
+        MAIL_GROUP_TAG_KEY,
+        MAIL_GROUP_SEAL,
     ];
 
     #[test]

@@ -167,6 +167,10 @@ pub fn mail(data: &[u8]) {
     let pending = pending_request(keys);
     let _ = mail::is_accept(&pending, data);
     let _ = mail::open_accept(&own, &keys.kem, &pending, data);
+    if let Ok(tag_key) = mail::group_tag_key(&keys.secret, &[6; 16], 1) {
+        let _ = mail::tag_matches(&tag_key, data);
+    }
+    let _ = mail::open_group(&keys.secret, &[6; 16], 1, data);
 }
 
 /// What a request's recipient parses once it decrypted it (§14.2): the padding and the card.
@@ -184,6 +188,21 @@ pub fn mail_accept_sealed(data: &[u8]) {
     let pending = pending_request(keys);
     let accept = mail::fuzzing::accept(&pending, &own, keys.kem.encapsulation_key(), 1, data);
     let _ = mail::open_accept(&own, &keys.kem, &pending, &accept);
+}
+
+/// What a member parses of group mail once it decrypted it (§16.3): the padding, the record and
+/// the group message inside.
+pub fn group_mail_sealed(data: &[u8]) {
+    let keys = keys();
+    let Ok(sealed) = mail::seal_group(&keys.secret, &[6; 16], 1, data) else {
+        return;
+    };
+    let record = mail::open_group(&keys.secret, &[6; 16], 1, &sealed).expect("sealed just now");
+    if let Ok(Some(ChatMessage::GroupMessage(message))) = ChatMessage::decode(&record)
+        && let Ok(message) = Message::read(&message)
+    {
+        let _ = message.open(&keys.secret);
+    }
 }
 
 fn pending_request(keys: &Keys) -> PendingRequest {
@@ -538,6 +557,7 @@ mod tests {
         mail_request_sealed: 1_000,
         mail_accept_sealed: 1_000,
         relay_frames: 10_000,
+        group_mail_sealed: 1_000,
     }
 
     /// Writes the seeds where libFuzzer starts from, `fuzz/corpus/<target>/` (see
@@ -566,6 +586,7 @@ mod tests {
             "mail_request_sealed",
             "mail_accept_sealed",
             "relay_frames",
+            "group_mail_sealed",
         ];
         for target in decoders {
             let dir = format!("{}/fuzz/corpus/{target}", env!("CARGO_MANIFEST_DIR"));
