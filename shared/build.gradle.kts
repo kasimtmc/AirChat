@@ -23,6 +23,8 @@ android {
 
 dependencies {
     api(project(":core-bridge"))
+    // Video frames travel from the hub to the decoder.
+    api(project(":media"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
 }

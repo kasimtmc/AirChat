@@ -59,9 +59,14 @@ You need:
   `rust/rust-toolchain.toml`; `rustup` installs them on first use.
 
 ```sh
+git clone --recurse-submodules https://github.com/kasimtmc/AirChat.git   # or, in a clone: git submodule update --init
 cargo install cargo-ndk
 ./gradlew assembleDebug
 ```
+
+Calls, push-to-talk and video come from [airchat-media](https://github.com/kasimtmc/airchat-media),
+shared with AirChat+, as a git submodule in `external/airchat-media` pinned to a tag: its Rust
+crate is a path dependency of the core and its Android library the Gradle project `:media`.
 
 The Rust core is compiled for arm64-v8a, armeabi-v7a and x86_64 as part of the Gradle build. The
 app runs on Android 10 (API 29) and later. The same build makes the provider app

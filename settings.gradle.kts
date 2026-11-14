@@ -27,3 +27,6 @@ include(":app")
 include(":core-bridge")
 include(":shared")
 include(":provider")
+// Audio and video, shared with AirChat+: the airchat-media submodule, pinned to a tag.
+include(":media")
+project(":media").projectDir = file("external/airchat-media/android")

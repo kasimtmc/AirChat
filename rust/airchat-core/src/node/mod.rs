@@ -287,6 +287,55 @@ pub enum Action {
     },
 }
 
+/// What the shared media logic reports, as the platform hears it.
+impl From<crate::media::Event> for Action {
+    fn from(event: crate::media::Event) -> Self {
+        use crate::media::Event;
+        match event {
+            Event::CallRinging { id, contact, video } => Self::CallRinging { id, contact, video },
+            Event::CallReached { id } => Self::CallReached { id },
+            Event::CallAccepted { id } => Self::CallAccepted { id },
+            Event::CallEnded { id, reason } => Self::CallEnded { id, reason },
+            Event::TalkStarted { id, contact } => Self::TalkStarted { id, contact },
+            Event::TalkEnded { id, reason } => Self::TalkEnded { id, reason },
+            Event::Audio {
+                stream,
+                from,
+                seq,
+                packet,
+            } => Self::Audio {
+                stream,
+                from,
+                seq,
+                packet,
+            },
+            Event::VideoStateChanged { id, from, state } => Self::VideoStateChanged { id, from, state },
+            Event::Video {
+                stream,
+                from,
+                key,
+                rotation,
+                width,
+                height,
+                frame,
+            } => Self::Video {
+                stream,
+                from,
+                key,
+                rotation,
+                width,
+                height,
+                frame,
+            },
+            Event::KeyFrameRequested { id } => Self::KeyFrameRequested { id },
+            Event::GroupTalkStarted { id, group, contact } => Self::GroupTalkStarted { id, group, contact },
+            Event::GroupCallRinging { id, group, contact } => Self::GroupCallRinging { id, group, contact },
+            Event::GroupCallChanged { id, participants } => Self::GroupCallChanged { id, participants },
+            Event::ChannelTalkStarted { id, channel, contact } => Self::ChannelTalkStarted { id, channel, contact },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Failure {
     /// The other user cancelled or said the emoji differ.
@@ -1771,7 +1820,7 @@ impl Node {
             }
             actions.extend(self.send_to(contact, vec![record], false));
         }
-        actions.extend(effects.actions);
+        actions.extend(effects.actions.into_iter().map(Action::from));
         actions
     }
 
@@ -1800,7 +1849,7 @@ impl Node {
                 actions.extend(self.send_to(to, vec![record], false));
             }
         }
-        actions.extend(effects.actions);
+        actions.extend(effects.actions.into_iter().map(Action::from));
         Ok(actions)
     }
 

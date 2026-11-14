@@ -15,6 +15,10 @@ airchat-core = { path = "airchat-core" }
 airchat-protocol = { path = "airchat-protocol" }
 # Vault, SQLCipher database and encrypted files, shared with AirChat+.
 airchat-storage = { git = "https://github.com/kasimtmc/airchat-storage", tag = "v0.1.0" }
+# Calls, push-to-talk, video and the jitter buffer, shared with AirChat+.
+# The airchat-media submodule (external/airchat-media), pinned to a tag; Gradle takes its Android
+# library from the same checkout.
+airchat-media = { path = "../external/airchat-media" }
 uniffi = "0.32.2"
 
 thiserror = "2.0.21"

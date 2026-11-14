@@ -34,6 +34,8 @@ AirChat/
 ├── provider/       The provider app (requirements AP-8): a spare phone as an always-on Air Provider
 ├── shared/         Android library both apps use: transports, Air Provider mode
 ├── core-bridge/    Android library: builds the Rust core for Android and exposes it to Kotlin
+├── external/airchat-media/  Submodule, pinned to a tag: calls, push-to-talk and video (Rust crate,
+│                   Android library `:media`), shared with AirChat+
 ├── rust/           Cargo workspace, platform-independent
 │   ├── airchat-protocol/ The protocol: formats and crypto (also kasimtmc/airchat-protocol)
 │   │   ├── docs/protocol.md  Protocol specification
@@ -523,11 +525,15 @@ Implemented so far (Android, `shared/src/main/java/com/plyg/airchat/net/`, used 
 
 ## 6. Media
 
+Since 2026-11-14 the call logic and jitter buffer (Rust) and the audio and video code (Android) are
+[airchat-media](https://github.com/kasimtmc/airchat-media), shared with AirChat+ and taken as a
+submodule; the core maps its events to its actions, and `runtime/Voice.kt` stays here.
+
 - **Audio:** platform capture with the voice-communication source (hardware echo cancellation and noise
   suppression) → Opus → encrypted datagrams → jitter buffer → playback. Calls are full duplex; PTT and
   walkie-talkie are half duplex with floor control.
 - **Video:** platform camera → hardware H.264 encoder → frames in parts, encrypted (protocol §8.6)
-  → hardware decoder. Wi-Fi only (`T-3`). In group calls (protocol §9.9, `media/group.rs`) every
+  → hardware decoder. Wi-Fi only (`T-3`). In group calls (protocol §9.9, airchat-media `group.rs`) every
   participant passes every video on, as it does audio, so a device sends at most 640 pixels a side
   at 15 frames a second, at most four cameras are on at once, and each participant's picture has a
   decoder of its own (`runtime/Voice.kt`); the slowest link to a participant sets the bitrate.
@@ -536,13 +542,13 @@ Implemented so far (Android, `shared/src/main/java/com/plyg/airchat/net/`, used 
   group, `runtime/Voice.kt` keeps a copy of the Opus packets in memory (up to what a voice message
   may hold). When the talk ends as *not allowed* or *busy* (in a group: when nobody is left to hear
   it), capture goes on into that copy only, the screen says a voice message is being recorded, and
-  letting go of the button wraps the packets in Ogg (`audio/OggOpus.kt`, in memory) and sends them
+  letting go of the button wraps the packets in Ogg (airchat-media `OggOpus.kt`, in memory) and sends them
   as an ordinary file, `voice-<time>.ogg`. A voice message plays in its bubble straight from the
   encrypted store through a `MediaDataSource`; the first play of one that came in is recorded
   (`attachments.played_at`, `group_attachments.played_at`, migration 22), and the node's tick
   deletes its content 15 minutes later and marks it gone (`node/voice.rs`). While locked nothing is
   deleted: the file stays encrypted until the next unlocked tick.
-- **Voice on Android** (`audio/VoiceEngine.kt`, `runtime/Voice.kt`): the microphone (voice
+- **Voice on Android** (airchat-media `VoiceEngine.kt`, `runtime/Voice.kt`): the microphone (voice
   communication source, echo canceller and noise suppressor where available) at 16 kHz, Opus on the
   platform codec at 24 kbit/s constant bitrate where supported, 20 ms packets; incoming packets go
   through the core's jitter buffer (60 ms) to the decoder and a voice-call audio track. Calls start
@@ -663,7 +669,7 @@ Implemented so far (Android, `shared/src/main/java/com/plyg/airchat/net/`, used 
   asking: the core looks for a files path on its tick for contacts with files waiting.
 - Group voice and channels over paths (protocol §9.6, §11.4, §11.5). Paths also lead to fellow
   group members who are not contacts (tagged with a group link key), so a group call's caller
-  reaches those out of reach. Group calls are repeated (`media/group.rs`): each participant sends
+  reaches those out of reach. Group calls are repeated (airchat-media `group.rs`): each participant sends
   a presence (a random origin and its identity) every 5 s and its audio under that origin, and
   passes on what it takes to its other participant links once (a 64-packet window per origin), so
   a call needs a path per participant, not per pair. The platform mixes by member (the `from` of

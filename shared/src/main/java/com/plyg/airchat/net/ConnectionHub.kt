@@ -16,6 +16,7 @@ import com.plyg.airchat.core.MoveTarget
 import com.plyg.airchat.core.PathClass
 import com.plyg.airchat.core.VideoState
 import com.plyg.airchat.core.pathConnectionBase
+import com.plyg.airchat.video.VideoFrame
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -254,17 +255,3 @@ class ConnectionHub(
 
 /** Links over paths through Air Providers run on connection ids from here up; the platform's stay below. */
 private val PATH_BASE = pathConnectionBase().toLong()
-
-/** A frame of video, put back together by the core (rust/airchat-protocol/docs/protocol.md §8.6, §9.9). */
-class VideoFrame(
-    val stream: ByteArray,
-    /** Whose: the contact, or a group call's participant (by row). */
-    val from: Long,
-    val key: Boolean,
-    /** Quarter turns clockwise that show it upright. */
-    val rotation: Int,
-    val width: Int,
-    val height: Int,
-    /** H.264, Annex B. */
-    val data: ByteArray,
-)

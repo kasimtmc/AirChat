@@ -31,6 +31,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # airchat-media (calls and video, shared with AirChat+), pinned to a tag.
+          submodules: true
       - name: Toolchain (rust/rust-toolchain.toml)
         run: rustup toolchain install && rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -77,6 +79,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # airchat-media (calls and video, shared with AirChat+), pinned to a tag.
+          submodules: true
       # A workspace without a committed lockfile is resolved here, with the pinned toolchain:
       # cargo-deny's container has an older Rust, whose resolution would pick older versions
       # (seen with ctutils 0.4.3, RUSTSEC-2026-0385, which 0.4.8 fixes but needs Rust 1.87).
@@ -96,6 +100,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # airchat-media (calls and video, shared with AirChat+), pinned to a tag.
+          submodules: true
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin

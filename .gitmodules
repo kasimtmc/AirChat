@@ -1,0 +1,3 @@
+[submodule "external/airchat-media"]
+	path = external/airchat-media
+	url = https://github.com/kasimtmc/airchat-media

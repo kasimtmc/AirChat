@@ -15,6 +15,7 @@ dependencies = [
 name = "airchat-core"
 version = "0.1.0"
 dependencies = [
+ "airchat-media",
  "airchat-protocol",
  "airchat-storage",
  "rusqlite",
@@ -30,6 +31,15 @@ dependencies = [
  "airchat-core",
  "thiserror",
  "uniffi",
+ "zeroize",
+]
+
+[[package]]
+name = "airchat-media"
+version = "0.1.0"
+dependencies = [
+ "airchat-protocol",
+ "thiserror",
  "zeroize",
 ]
 

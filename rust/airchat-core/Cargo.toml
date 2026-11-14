@@ -11,6 +11,7 @@ publish.workspace = true
 fuzzing = ["airchat-protocol/fuzzing"]
 
 [dependencies]
+airchat-media.workspace = true
 airchat-protocol.workspace = true
 airchat-storage.workspace = true
 rusqlite.workspace = true

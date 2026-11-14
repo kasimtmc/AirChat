@@ -8,21 +8,24 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.plyg.airchat.BuildConfig
+import com.plyg.airchat.audio.Jitter
 import com.plyg.airchat.audio.OggOpus
 import com.plyg.airchat.audio.VOICE_RATE
 import com.plyg.airchat.audio.VoiceEngine
 import com.plyg.airchat.core.Account
 import com.plyg.airchat.core.CoreException
 import com.plyg.airchat.core.EndReason
+import com.plyg.airchat.core.JitterBuffer
+import com.plyg.airchat.core.Playout
 import com.plyg.airchat.core.Started
 import com.plyg.airchat.core.VideoState
 import com.plyg.airchat.core.maxVoiceBytes
 import com.plyg.airchat.net.ConnectionHub
 import com.plyg.airchat.net.NetEvent
 import com.plyg.airchat.net.TransportKind
-import com.plyg.airchat.net.VideoFrame
 import com.plyg.airchat.video.CameraSender
 import com.plyg.airchat.video.VideoFormat
+import com.plyg.airchat.video.VideoFrame
 import com.plyg.airchat.video.VideoReceiver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -754,7 +757,7 @@ class Voice(
 
     private fun startEngine(stream: ByteArray, send: Boolean, play: Boolean, loud: Boolean, chirp: Boolean = false) {
         stopEngine()
-        val engine = VoiceEngine(app) { packet -> captured(stream, packet) }
+        val engine = VoiceEngine(app, ::CoreJitter) { packet -> captured(stream, packet) }
         engine.open(loud)
         if (play) engine.startPlaying(chirp) else if (chirp) engine.playChirp()
         if (send && microphonePermitted()) {
@@ -803,4 +806,13 @@ class Voice(
         const val RAISE_AFTER_MS = 4_000L
         const val RAISE_EVERY_MS = 2_000L
     }
+}
+
+/** airchat-media's jitter buffer, through the core's FFI. */
+private class CoreJitter(target: UInt, max: UInt) : Jitter {
+    private val buffer = JitterBuffer(target, max)
+
+    override fun push(seq: UInt, packet: ByteArray) = buffer.push(seq, packet)
+
+    override fun next(): ByteArray? = (buffer.pop() as? Playout.Packet)?.data
 }

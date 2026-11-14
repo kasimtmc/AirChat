@@ -75,6 +75,7 @@ android {
 dependencies {
     implementation(project(":core-bridge"))
     implementation(project(":shared"))
+    implementation(project(":media"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

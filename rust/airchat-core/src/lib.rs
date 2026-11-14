@@ -9,8 +9,8 @@ pub mod account;
 #[cfg(any(test, feature = "fuzzing"))]
 pub mod fuzz;
 pub mod inbox;
-pub mod jitter;
-pub mod media;
+/// Calls, push-to-talk and video, and the jitter buffer: shared with AirChat+.
+pub use airchat_media::{self as media, jitter};
 pub mod node;
 pub mod storage;
 
