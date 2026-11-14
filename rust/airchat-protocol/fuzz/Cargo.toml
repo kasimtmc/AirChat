@@ -101,3 +101,15 @@ path = "fuzz_targets/attestation.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "account_request"
+path = "fuzz_targets/account_request.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "account_answer"
+path = "fuzz_targets/account_answer.rs"
+test = false
+doc = false

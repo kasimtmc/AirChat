@@ -9,7 +9,8 @@ and the vectors together.
 This document must be complete enough for an independent implementation (e.g. iOS or Linux) to
 interoperate with the reference implementation. Every section ships with test vectors in
 `tests/vectors/`. Requirement numbers (C-2, S-12, T-5, …) refer to the requirements of the AirChat
-app, the protocol's first user; they say why something is so, never what an implementation must do.
+app, the protocol's first user, and those of §13 to AirChat+, its internet sibling; they say why
+something is so, never what an implementation must do.
 
 ## 1. Goals
 
@@ -34,6 +35,7 @@ app, the protocol's first user; they say why something is so, never what an impl
 | Routing | The mesh, and paths through Air Providers, with pseudonymous addresses | 10, 12 |
 | Real-time media | Encrypted audio and video records | 8.5, 8.6 |
 | Channels | Walkie-talkie channels | 11 |
+| Accounts | Accounts at a server, for AirChat+ over the internet | 13 |
 
 A message relayed through providers is protected twice: end-to-end by the message layer and on every
 hop by the link session.
@@ -1869,3 +1871,131 @@ gives up.
 pair, the records of §12.1 to §12.3, a channel's path key with a tag and proof, a cluster
 nonce and a *channel head* record (§11.5), and an AirChat ID's path key with a tag and proof
 (§4.8); `check_paths.py` re-derives them from this section.
+
+## 13. Accounts
+
+AirChat+ (requirements `A-1` to `A-9` of AirChat+) runs over the internet: each user has an account at
+a server, `name@server`, which exists only so that envelopes find their recipient. This section is
+what a device and its own server exchange to create an account, sign in and prove a session.
+Nothing here is ever sent between devices, and nothing here protects content: secrecy and
+authenticity of messages never depend on the server (§1).
+
+Every message below is a two-byte header, the wire version `0x00` and its number, then its fields.
+A device sends one request as the body of an HTTPS `POST` to the server's account endpoint and
+gets one answer (`0x7f` on failure). Decoders reject wrong lengths and trailing bytes.
+
+### 13.1 Names
+
+```
+name    = 3–32 bytes of a–z 0–9 . _ ; not starting or ending with . or _ ; no two of . _ in a row
+server  = the server's DNS name, lowercase ASCII, 1–253 bytes
+Name(x) = len(x) (u8) || x
+```
+
+A device lowercases what the user types before checking it; anything else is rejected, so two
+names that look alike cannot both exist. `name@server` is the account's address.
+
+### 13.2 Password and auth key
+
+```
+params   = memory_kib (u32) || iterations (u32) || parallelism (u8)
+root     = Argon2id(password, salt, params) -> 32 bytes          (RFC 9106, version 0x13)
+auth_key = HKDF(salt = "", ikm = root, info = "AirChat v1 account-auth" || Name(server) || Name(name), 32)
+```
+
+- `password` is the UTF-8 of what the user typed, in Unicode NFC; at least 10 characters.
+- `salt` is 16 random bytes the device makes when it registers or changes the password.
+- `params` are the server's current ones (§13.3); a server accepts nothing below 64 MiB, 3 passes,
+  1 lane, nor above 1 GiB, 10 passes, 4 lanes.
+- `auth_key` is all the server ever gets. Binding it to the server and the name makes it useless at
+  any other server or for any other name; `root` is used for nothing else.
+- The server stores `verifier = Argon2id(auth_key, server_salt, server_params)` with a random
+  16-byte `server_salt` of its own (server-local; any slow hash will do), so a stolen account table
+  costs a guesser both derivations per password tried.
+
+### 13.3 Prelogin
+
+```
+0x70 prelogin:    Name(name)
+0x71 parameters:  salt (16) || params (9)
+```
+
+The answer for an account is its salt and parameters. For a name with no account it is
+`salt = HMAC-SHA-256(server_secret, "AirChat v1 account-fake-salt" || Name(name))[0..16]` and the
+server's current parameters, so the answer does not show whether the account exists, and is the same
+every time it is asked. When the server raises its parameters, accounts keep their old ones until
+their next sign in (§13.5), which re-derives the key with the new ones; meanwhile those accounts can
+be told apart from names without one.
+
+### 13.4 Register
+
+```
+0x72 register:  Name(name) || salt (16) || params (9) || auth_key (32) || IK (32) || signature (64)
+signature = Sign(IK, "AirChat v1 account-register" || Name(server) || all fields before it)
+```
+
+`IK` is the identity key of §4.1, made on the device for this account. The server checks the name
+(§13.1), the parameters (§13.2) and the signature, refuses a name in use or in quarantine (a deleted
+account's, for 30 days), stores the account, and answers as a sign in does (`0x76`).
+
+### 13.5 Sign in
+
+```
+0x73 challenge request:  (empty)
+0x74 challenge:          nonce (32)
+0x75 sign in:            Name(name) || auth_key (32) || IK (32) || nonce (32) || rekey || signature (64)
+0x76 session:            token (32) || replaced (u8)
+rekey     = 0x00, or 0x01 || salt (16) || params (9) || new_auth_key (32)
+signature = Sign(IK, "AirChat v1 account-sign-in" || Name(server) || all fields before it)
+```
+
+- A challenge is random, used once, and good for 60 s.
+- The server checks the challenge, `auth_key` against the verifier, and the signature. A device
+  re-keys (`0x01`) when the account's parameters are not the server's current ones; the server then
+  also replaces salt, parameters and verifier.
+- If `IK` is not the account's key, the device is new (`A-5`): the server makes `IK` the account's
+  key, ends every session of the old one, and answers `replaced = 1`; else `replaced = 0`.
+- `token` is 32 random bytes. The server keeps only `SHA-256(token)` and the `IK` it is bound to.
+
+### 13.6 Requests on a session
+
+```
+0x77 authorized:  token (32) || nonce (32) || kind (u8) || body || signature (64)
+signature = Sign(IK, "AirChat v1 account-session" || Name(server) || all fields before it)
+0x78 done:        (empty)
+
+kind 1  sign out:         body empty                       ends this session
+kind 2  delete account:   body = auth_key (32)              ends every session, deletes everything
+kind 3  change password:  body = auth_key (32) || salt (16) || params (9) || new_auth_key (32)
+                                                            ends every other session
+```
+
+`nonce` is a fresh challenge (§13.5): every request on a session proves both the token and the
+identity key, so neither alone, nor a copy of what the server stores, is enough (`A-6`).
+
+### 13.7 Failures
+
+```
+0x7f failure:  code (u8) || retry_after (u32, seconds; 0 if none)
+
+code 1  malformed           2  name taken          3  wrong credentials
+     4  too many attempts   5  challenge expired   6  invalid name
+     7  parameters refused  8  session refused
+```
+
+- An unknown name and a wrong password both give `3`, after the same work: the server checks the
+  `auth_key` against a dummy verifier when there is no account.
+- `4` comes from limits per name and per source address, the same for names with and without an
+  account.
+
+### 13.8 What a server learns
+
+The name, the identity key, the salt and parameters, a slow hash of `auth_key`, hashes of session
+tokens, and when sessions are used. Never the password, nor anything to sign in with elsewhere, nor
+anything about the account's contacts or messages.
+
+### 13.9 Test vectors
+
+`tests/vectors/account.json` holds `auth_key` for a password and salt with cheap parameters, the fake
+salt for a name and server secret, and a register, sign in and authorized request with their
+signatures; `check_account.py` re-derives them from this section.

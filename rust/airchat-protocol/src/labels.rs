@@ -120,6 +120,17 @@ pub const STORAGE_FILE_CHUNK: &[u8] = b"AirChat v1 storage file-chunk";
 /// Key of one entry in the locked-mode inbox, derived from its X-Wing shared secret.
 pub const INBOX_ENTRY: &[u8] = b"AirChat v1 inbox-entry";
 
+/// Derives an account's auth key from its password root (docs/protocol.md §13.2).
+pub const ACCOUNT_AUTH: &[u8] = b"AirChat v1 account-auth";
+/// MAC input for the salt a server gives for a name with no account (§13.3).
+pub const ACCOUNT_FAKE_SALT: &[u8] = b"AirChat v1 account-fake-salt";
+/// Signature input of a registration (§13.4).
+pub const ACCOUNT_REGISTER: &[u8] = b"AirChat v1 account-register";
+/// Signature input of a sign in (§13.5).
+pub const ACCOUNT_SIGN_IN: &[u8] = b"AirChat v1 account-sign-in";
+/// Signature input of a request on a session (§13.6).
+pub const ACCOUNT_SESSION: &[u8] = b"AirChat v1 account-session";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,6 +169,11 @@ mod tests {
         INBOX_ENTRY,
         BUILD_ATTEST_CHALLENGE,
         BUILD_ATTEST_PROOF,
+        ACCOUNT_AUTH,
+        ACCOUNT_FAKE_SALT,
+        ACCOUNT_REGISTER,
+        ACCOUNT_SIGN_IN,
+        ACCOUNT_SESSION,
     ];
 
     #[test]

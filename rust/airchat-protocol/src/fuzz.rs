@@ -9,6 +9,7 @@
 use std::sync::OnceLock;
 
 use crate::{
+    account::{Answer, Request},
     channel::{Channel, Hello},
     chat::ChatMessage,
     crypto::{SecretBytes, kem::DecapsulationKey},
@@ -103,6 +104,34 @@ pub fn envelope(data: &[u8]) {
     let _ = mesh::open_part(&keys.secret, &envelope, 0);
     let _ = mesh::open_group_file_part(&keys.secret, &envelope, 0);
     let _ = mesh::open_update_part(&keys.secret, &envelope);
+}
+
+/// What a device sends its account server (§13), as the server reads it: signatures checked against
+/// a server name, and what decodes encodes back to the same bytes.
+pub fn account_request(data: &[u8]) {
+    let Ok(request) = Request::decode(data) else {
+        return;
+    };
+    assert_eq!(request.encode(), data);
+    match &request {
+        Request::Register(register) => {
+            let _ = register.verify("chat.example.org");
+        }
+        Request::SignIn(sign_in) => {
+            let _ = sign_in.verify("chat.example.org");
+        }
+        Request::Authorized(authorized) => {
+            let _ = authorized.verify(&keys().identity.public(), "chat.example.org");
+        }
+        Request::Prelogin { .. } | Request::ChallengeRequest => {}
+    }
+}
+
+/// What an account server answers (§13), as a device reads it.
+pub fn account_answer(data: &[u8]) {
+    if let Ok(answer) = Answer::decode(data) {
+        assert_eq!(answer.encode(), data);
+    }
 }
 
 /// A list of envelopes a neighbour holds (§10.4).
@@ -414,6 +443,8 @@ mod tests {
         handshake_answer: 500,
         handshake_last: 500,
         attestation: 5_000,
+        account_request: 10_000,
+        account_answer: 10_000,
     }
 
     /// Writes the seeds where libFuzzer starts from, `fuzz/corpus/<target>/` (see

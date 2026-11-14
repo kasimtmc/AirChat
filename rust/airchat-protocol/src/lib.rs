@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod account;
 pub mod attest;
 pub mod channel;
 pub mod chat;
