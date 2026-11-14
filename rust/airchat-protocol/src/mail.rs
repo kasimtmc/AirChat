@@ -621,6 +621,63 @@ fn unpad(padded: &[u8]) -> Result<&[u8], MailError> {
     Ok(&rest[..len])
 }
 
+/// Requests and accepts whose sealed plaintext is chosen, for fuzz targets: what a recipient parses
+/// once it decrypted (the padding, the card) is fuzzed too, not only what comes before the AEAD.
+#[cfg(any(test, feature = "fuzzing"))]
+pub(crate) mod fuzzing {
+    use super::*;
+
+    /// A request to `to` (its static key `to_static`, of `version`) sealing `plaintext`, cut or
+    /// filled with zeros to the request's size.
+    pub(crate) fn request(
+        server: &str,
+        name: &str,
+        to: &PublicIdentity,
+        to_static: &EncapsulationKey,
+        version: u32,
+        plaintext: &[u8],
+    ) -> Vec<u8> {
+        let (secret, ciphertext) = to_static.encapsulate().expect("a valid key");
+        let transcript = request_transcript(server, name, to, version, &ciphertext);
+        let key =
+            kdf::derive(b"", secret.expose(), &[labels::MAIL_REQUEST_KEY, &transcript].concat()).expect("32 bytes");
+        let mut padded = plaintext.to_vec();
+        padded.resize(REQUEST_LEN - REQUEST_HEADER_LEN - aead::TAG_LEN, 0);
+        let sealed = ChaCha20Poly1305::seal(&key, &ZERO_NONCE, &[], &padded).expect("a fitting plaintext");
+        [&version.to_be_bytes()[..], ciphertext.as_bytes(), &sealed].concat()
+    }
+
+    /// An accept of `request` to its requester `to` (static key `to_static`, of `version`) sealing
+    /// `plaintext`, filled with zeros to the smallest mail size it fits (cut to the largest).
+    pub(crate) fn accept(
+        request: &PendingRequest,
+        to: &PublicIdentity,
+        to_static: &EncapsulationKey,
+        version: u32,
+        plaintext: &[u8],
+    ) -> Vec<u8> {
+        let tag_key = accept_tag_key(&request.secret, &request.transcript).expect("32 bytes");
+        let tag = new_tag(&tag_key, &mut OsRng).expect("randomness");
+        let (secret, ciphertext) = to_static.encapsulate().expect("a valid key");
+        let transcript = accept_transcript(&request.transcript, to, version, &ciphertext);
+        let key = kdf::derive(
+            b"",
+            secret.expose(),
+            &[labels::MAIL_ACCEPT_KEY, &transcript, &tag].concat(),
+        )
+        .expect("32 bytes");
+        let room = |size: usize| size - MAIL_HEADER_LEN - aead::TAG_LEN;
+        let size = MAIL_SIZES
+            .into_iter()
+            .find(|&size| plaintext.len() <= room(size))
+            .unwrap_or(MAIL_SIZES[2]);
+        let mut padded = plaintext.to_vec();
+        padded.resize(room(size), 0);
+        let sealed = ChaCha20Poly1305::seal(&key, &ZERO_NONCE, &[], &padded).expect("a fitting plaintext");
+        [&tag[..], &version.to_be_bytes(), ciphertext.as_bytes(), &sealed].concat()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -974,6 +1031,55 @@ mod tests {
             ("taken_frame", to_hex(&taken_frame)),
         ];
         check_vector("mail", &fields);
+    }
+
+    /// The fuzzing builders reach the parsers behind the AEAD: a real card in them opens.
+    #[test]
+    fn fuzzing_builders_reach_the_card() {
+        let ayse = Account::new(0xa1, "chat.example.org", "ayse");
+        let burak = Account::new(0xb2, "chat.example.org", "burak");
+        let b = burak.identity.public();
+        // The card goes in as plaintext; its proof cannot match the builder's transcript, so the
+        // parse runs to the signature check and stops there.
+        let signed = ayse
+            .card()
+            .sign(&ayse.identity, labels::MAIL_REQUEST_PROOF, &[0; 32])
+            .unwrap();
+        let card = pad(&signed, signed.len() + 2).unwrap();
+        let sealed = fuzzing::request(
+            burak.server,
+            burak.name,
+            &b,
+            burak.static_key.encapsulation_key(),
+            3,
+            &card,
+        );
+        assert_eq!(
+            open_request(&b, burak.server, burak.name, &burak.static_key, &sealed).unwrap_err(),
+            MailError::DoesNotOpen,
+            "decrypted and parsed, refused at the proof"
+        );
+        let garbage = fuzzing::request(
+            burak.server,
+            burak.name,
+            &b,
+            burak.static_key.encapsulation_key(),
+            3,
+            &[0xff; 3],
+        );
+        assert_eq!(
+            open_request(&b, burak.server, burak.name, &burak.static_key, &garbage).unwrap_err(),
+            MailError::Malformed,
+            "decrypted, refused by the padding"
+        );
+        let (_, pending) = request(&ayse.identity, &ayse.card(), &burak.peer()).unwrap();
+        let a = ayse.identity.public();
+        let accept = fuzzing::accept(&pending, &a, ayse.static_key.encapsulation_key(), 3, &card);
+        assert!(is_accept(&pending, &accept));
+        assert_eq!(
+            open_accept(&a, &ayse.static_key, &pending, &accept).unwrap_err(),
+            MailError::DoesNotOpen
+        );
     }
 
     #[test]

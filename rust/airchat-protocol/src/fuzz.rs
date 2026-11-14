@@ -163,18 +163,39 @@ pub fn mail(data: &[u8]) {
     }
     let _ = mail::sealed_to(data);
     let _ = mail::open(&pair, &keys.kem, data);
-    let pending = PendingRequest {
+    let pending = pending_request(keys);
+    let _ = mail::is_accept(&pending, data);
+    let _ = mail::open_accept(&own, &keys.kem, &pending, data);
+}
+
+/// What a request's recipient parses once it decrypted it (§14.2): the padding and the card.
+pub fn mail_request_sealed(data: &[u8]) {
+    let keys = keys();
+    let own = keys.identity.public();
+    let request = mail::fuzzing::request("chat.example.org", "ayse", &own, keys.kem.encapsulation_key(), 1, data);
+    let _ = mail::open_request(&own, "chat.example.org", "ayse", &keys.kem, &request);
+}
+
+/// What a requester parses of an accept once it decrypted it (§14.3): the padding and the card.
+pub fn mail_accept_sealed(data: &[u8]) {
+    let keys = keys();
+    let own = keys.identity.public();
+    let pending = pending_request(keys);
+    let accept = mail::fuzzing::accept(&pending, &own, keys.kem.encapsulation_key(), 1, data);
+    let _ = mail::open_accept(&own, &keys.kem, &pending, &accept);
+}
+
+fn pending_request(keys: &Keys) -> PendingRequest {
+    PendingRequest {
         to: Peer {
             server: "chat.example.org".into(),
             name: "burak".into(),
-            identity: them,
+            identity: keys.other.public(),
             static_key: SignedStaticKey::new(&keys.other, 1, keys.other_kem.encapsulation_key()),
         },
         secret: keys.secret.clone(),
         transcript: [7; 32],
-    };
-    let _ = mail::is_accept(&pending, data);
-    let _ = mail::open_accept(&own, &keys.kem, &pending, data);
+    }
 }
 
 /// The frames of a mailbox connection (§14.6), each side's as the other reads them.
@@ -503,6 +524,8 @@ mod tests {
         mail_request: 2_000,
         mail: 2_000,
         mailbox_frames: 10_000,
+        mail_request_sealed: 1_000,
+        mail_accept_sealed: 1_000,
     }
 
     /// Writes the seeds where libFuzzer starts from, `fuzz/corpus/<target>/` (see
@@ -528,6 +551,8 @@ mod tests {
             "mail_request",
             "mail",
             "mailbox_frames",
+            "mail_request_sealed",
+            "mail_accept_sealed",
         ];
         for target in decoders {
             let dir = format!("{}/fuzz/corpus/{target}", env!("CARGO_MANIFEST_DIR"));

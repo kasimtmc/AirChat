@@ -2117,7 +2117,11 @@ payload  = a §8.1 record of a kind below
   the mailbox and dropped. Tags are new for every mail, so the server cannot tell two pieces of mail
   from one sender apart from two senders' (M-3).
 - **Static keys.** Sealed to `SK_b`, mail is sealed to the newest static key of `b`'s that `a`
-  holds; `b` tries its own from the version `a` took last (§6.9).
+  holds; `b` tries its own from the version `a` took last (§6.9). A device makes a new static key
+  every week, publishes it at its server (§14.1) and tells its contacts in mail (`0x5c`, until they
+  answer `0x5d`). It keeps an older one until every contact took a newer one **and** for at least
+  30 days after making the next: mail and requests sealed to it may wait that long at the server
+  (§14.5). §6.9's 25 hours are for mesh envelopes, which live a day.
 - **Kinds.** A payload is one of: text `0x01`, ack `0x02`, refused `0x05` (§8.1); prekeys `0x5a`
   and prekeys wanted `0x5b` (§14.7); static key `0x5c` and static key taken `0x5d` (§6.9); and
 
