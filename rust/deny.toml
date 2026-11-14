@@ -29,6 +29,9 @@ unused-allowed-license = "allow"
 exceptions = [
     # LLVM's libFuzzer, for `rust/fuzz` only; nothing of it ships. NCSA is GPL-compatible.
     { allow = ["NCSA"], crate = "libfuzzer-sys" },
+    # SQLCipher's sources: SQLite's public-domain blessing, and libtomcrypt (WTFPL), which ships in
+    # the crate but is not built here (SQLCipher uses the vendored OpenSSL). Both GPL-compatible.
+    { allow = ["blessing", "WTFPL"], crate = "sqlcipher-src" },
 ]
 
 [bans]

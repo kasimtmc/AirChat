@@ -20,7 +20,7 @@ zeroize = { version = "1.9.1", features = ["derive"] }
 
 # SQLCipher: the whole database file, including its structure, is encrypted (requirement S-2).
 # OpenSSL is built from source because Android does not expose a system libcrypto.
-rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher-vendored-openssl"] }
+rusqlite = { version = "0.42.0", features = ["bundled-sqlcipher-vendored-openssl"] }
 
 # Key derivation and crypto are unusably slow unoptimised; optimise them even in debug builds.
 [profile.dev.package.argon2]
