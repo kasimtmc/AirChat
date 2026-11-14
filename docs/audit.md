@@ -25,7 +25,7 @@ own implementations, radio-level fingerprinting.
 | Handshakes: links, pairing | `airchat-protocol/src/link/`, `src/pairing/` |
 | Groups, mesh, channels, paths (formats) | `airchat-protocol/src/group.rs`, `mesh.rs`, `channel.rs`, `path.rs` |
 | What a device does with them (state, acceptance rules) | `AirChat/rust/airchat-core/src/node/` |
-| Encrypted storage (SQLCipher, key hierarchy) | `AirChat/rust/airchat-core/src/storage/` |
+| Encrypted storage (SQLCipher, key hierarchy) | [kasimtmc/airchat-storage](https://github.com/kasimtmc/airchat-storage) (vault, database engine, files; since 2026-11-14, after `audit-1`), the tables in `AirChat/rust/airchat-core/src/storage/` |
 | Android: lock, Keystore, transports, UI | `AirChat/app/src/main/java/com/plyg/airchat/` |
 | Test vectors and independent checkers | `airchat-protocol/tests/vectors/` |
 | Fuzz targets | `airchat-protocol/src/fuzz.rs`, `AirChat/rust/airchat-core/src/fuzz.rs`, `node/fuzz.rs` |

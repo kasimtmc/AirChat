@@ -131,6 +131,31 @@ pub const ACCOUNT_SIGN_IN: &[u8] = b"AirChat v1 account-sign-in";
 /// Signature input of a request on a session (§13.6).
 pub const ACCOUNT_SESSION: &[u8] = b"AirChat v1 account-session";
 
+/// Transcript hash of a contact request (docs/protocol.md §14.2).
+pub const MAIL_REQUEST: &[u8] = b"AirChat v1 mail-request-hash";
+/// Key of a contact request (§14.2).
+pub const MAIL_REQUEST_KEY: &[u8] = b"AirChat v1 mail-request-key";
+/// Signature input of a contact request's proof (§14.2).
+pub const MAIL_REQUEST_PROOF: &[u8] = b"AirChat v1 mail-request-proof";
+/// Transcript hash of an accept (§14.3).
+pub const MAIL_ACCEPT: &[u8] = b"AirChat v1 mail-accept-hash";
+/// Tag key of an accept (§14.3).
+pub const MAIL_ACCEPT_TAG_KEY: &[u8] = b"AirChat v1 mail-accept-tag-key";
+/// Key of an accept (§14.3).
+pub const MAIL_ACCEPT_KEY: &[u8] = b"AirChat v1 mail-accept-key";
+/// Signature input of an accept's proof (§14.3).
+pub const MAIL_ACCEPT_PROOF: &[u8] = b"AirChat v1 mail-accept-proof";
+/// The pairing secret of two contacts made by mail (§14.3).
+pub const MAIL_PSK: &[u8] = b"AirChat v1 mail-psk";
+/// Tag key of mail from one contact to another (§14.3).
+pub const MAIL_TAG_KEY: &[u8] = b"AirChat v1 mail-tag-key";
+/// MAC input of a mail tag (§14.3).
+pub const MAIL_TAG: &[u8] = b"AirChat v1 mail-tag-mac";
+/// Key of mail between contacts (§14.3).
+pub const MAIL_SEAL: &[u8] = b"AirChat v1 mail-seal";
+/// Hash input of a delivery key, as a server keeps it (§14.4).
+pub const MAIL_DELIVERY_KEY: &[u8] = b"AirChat v1 mail-delivery-key";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +199,18 @@ mod tests {
         ACCOUNT_REGISTER,
         ACCOUNT_SIGN_IN,
         ACCOUNT_SESSION,
+        MAIL_REQUEST,
+        MAIL_REQUEST_KEY,
+        MAIL_REQUEST_PROOF,
+        MAIL_ACCEPT,
+        MAIL_ACCEPT_TAG_KEY,
+        MAIL_ACCEPT_KEY,
+        MAIL_ACCEPT_PROOF,
+        MAIL_PSK,
+        MAIL_TAG_KEY,
+        MAIL_TAG,
+        MAIL_SEAL,
+        MAIL_DELIVERY_KEY,
     ];
 
     #[test]

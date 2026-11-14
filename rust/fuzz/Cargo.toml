@@ -141,3 +141,7 @@ name = "attestation"
 path = "fuzz_targets/attestation.rs"
 test = false
 doc = false
+
+# As in the main workspace: airchat-storage's protocol is the in-tree copy.
+[patch."https://github.com/kasimtmc/airchat-protocol"]
+airchat-protocol = { path = "../airchat-protocol" }

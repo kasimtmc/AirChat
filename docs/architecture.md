@@ -112,7 +112,10 @@ frames to send, events and decrypted content for display.
 ## 4. Storage and keys
 
 The core owns the encrypted store, so the "never plaintext on disk" rule (`S-2`) is enforced in one
-place for every platform (`rust/airchat-core/src/storage/`).
+place for every platform (`rust/airchat-core/src/storage/`). Since 2026-11-14 its engine, the key
+hierarchy (vault), the database's opening and migrations, and the encrypted files, is the crate
+[airchat-storage](https://github.com/kasimtmc/airchat-storage), shared with AirChat+; the tables and
+what goes in them stay here.
 
 - **Database:** SQLCipher (via `rusqlite`, OpenSSL built from source). The whole file is encrypted,
   including the SQLite header and the write-ahead log, so not even the number of contacts or messages
@@ -121,7 +124,7 @@ place for every platform (`rust/airchat-core/src/storage/`).
   header appears in any file.
 - **Files** (media, documents): each file is its own file in `files/`, named by its message's row
   id and encrypted in 15 KiB chunks with XChaCha20-Poly1305 under the file key; each chunk is bound
-  to its file and position (`storage/files.rs`, protocol §8.4). Name, type, size, hash and
+  to its file and position (airchat-storage `files.rs`, protocol §8.4). Name, type, size, hash and
   thumbnail live in the database. Chunks are written in order; progress is recorded in the database
   only after an `fsync`, so after a crash the recorded size never claims more than is on disk, and
   a torn tail is cut off before the next chunk. Files still being imported when the app died are

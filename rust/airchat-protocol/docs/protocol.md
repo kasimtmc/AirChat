@@ -9,7 +9,7 @@ and the vectors together.
 This document must be complete enough for an independent implementation (e.g. iOS or Linux) to
 interoperate with the reference implementation. Every section ships with test vectors in
 `tests/vectors/`. Requirement numbers (C-2, S-12, T-5, …) refer to the requirements of the AirChat
-app, the protocol's first user, and those of §13 to AirChat+, its internet sibling; they say why
+app, the protocol's first user, and those of §13 and §14 to AirChat+, its internet sibling; they say why
 something is so, never what an implementation must do.
 
 ## 1. Goals
@@ -798,6 +798,8 @@ payload = kind (u8) || body
 0x5a–0x5b:  prekeys (§10.7)
 0x5c–0x5d:  static key versions (§6.9)
 0x5e–0x5f:  presence key versions (§5.4)
+0x60:       build attestation (§6.10)
+0x61:       delivery key (§14.4)
 ```
 
 - The receiver stores a text message or file offer (§8.4), then acknowledges it, also when it is a
@@ -1968,6 +1970,9 @@ kind 1  sign out:         body empty                       ends this session
 kind 2  delete account:   body = auth_key (32)              ends every session, deletes everything
 kind 3  change password:  body = auth_key (32) || salt (16) || params (9) || new_auth_key (32)
                                                             ends every other session
+kind 4  publish static key:  body = version (u32) || SK.pk (1216) || signature (64)       §14.1
+kind 5  set delivery key:    body = SHA-256("AirChat v1 mail-delivery-key" || dk) (32)    §14.4
+kind 6  open mailbox:        body empty; only as the first frame of a mailbox connection  §14.6
 ```
 
 `nonce` is a fresh challenge (§13.5): every request on a session proves both the token and the
@@ -1980,7 +1985,7 @@ identity key, so neither alone, nor a copy of what the server stores, is enough 
 
 code 1  malformed           2  name taken          3  wrong credentials
      4  too many attempts   5  challenge expired   6  invalid name
-     7  parameters refused  8  session refused
+     7  parameters refused  8  session refused     9  refused (§14)
 ```
 
 - An unknown name and a wrong password both give `3`, after the same work: the server checks the
@@ -1999,3 +2004,209 @@ anything about the account's contacts or messages.
 `tests/vectors/account.json` holds `auth_key` for a password and salt with cheap parameters, the fake
 salt for a name and server secret, and a register, sign in and authorized request with their
 signatures; `check_account.py` re-derives them from this section.
+
+## 14. Mail
+
+Two AirChat+ accounts never connect to each other. A device leaves what it sends at the
+recipient's server, sealed so that only the recipient can open it and the server cannot tell who
+sent it (requirements M-2, M-3); the recipient's device takes it over its own connection to that
+server (N-1). This section is how contacts are made without meeting (requirement C-2), and how
+they then exchange mail. Messages to and from the server have the two-byte header of §13 and the
+same failures (§13.7); the server's DNS name is `server` as in §13.1.
+
+`a` is the sender of a piece of mail and `b` its recipient. As in AirChat, every device has an
+identity key `IK` (§4.1) and weekly static X-Wing keys `SK` (§6.1, §6.9); contacts share a pairing
+secret `psk`, from which everything else between them is derived.
+
+### 14.1 Static keys and lookup
+
+An account publishes its newest static key at its server, on its session (§13.6, kind 4), in the
+signed form of §6.9: `version (u32) || SK.pk (1216) || signature (64)`. The server checks the
+signature with the session's `IK` and keeps the newest version; a device publishes each new static
+key when it makes it.
+
+```
+0x80 lookup:  Name(name)
+0x81 keys:    IK (32) || version (u32) || SK.pk (1216) || signature (64)
+```
+
+Anyone may look a name up, over a connection not signed in; the answer for a name without an
+account, or one that has published no static key, is failure `9`. The asker checks the signature
+before using the key. Looking a name up tells the asker that the account exists (threat model B6);
+the server rate-limits lookups per source as it does prelogins.
+
+### 14.2 Contact requests
+
+A user who types `name@server` asks to become that account's contact. Their device `A` looks the
+name up (§14.1) and leaves a *request*; the device `B` of the account opens it, shows its user who
+asks, and if the user accepts, mails back an *accept* (§14.3). Both then hold `psk`.
+
+**Request.** `A` encapsulates to the static key `SK_B` (version `v_B`) it was given:
+
+```
+(ss_1, ct_1) = X-Wing.Encaps(SK_B)
+h_1      = SHA-256("AirChat v1 mail-request-hash" || Name(server_B) || Name(name_B) || IK_B || v_B (u32) || ct_1)
+k_1      = HKDF(salt = "", ikm = ss_1, info = "AirChat v1 mail-request-key" || h_1)
+inner_1  = Name(server_A) || Name(name_A) || IK_A || v_A (u32) || SK_A.pk (1216) || sk_signature_A (64)
+           || dk_A (32) || proof_A (64)
+proof_A  = Ed25519(IK_A, "AirChat v1 mail-request-proof" || h_1 || all of inner_1 before it)
+request  = v_B (u32) || ct_1 (1120) || ChaCha20-Poly1305(k_1, nonce = 12 zero bytes, aad = "", padded_1)
+padded_1 = len (u16) || inner_1 || zeros, making the request exactly 4096 bytes
+```
+
+- `SK_A` is `A`'s newest static key, `sk_signature_A` its §6.9 signature, and `dk_A` `A`'s
+  delivery key (§14.4), so that `B` can mail back.
+- `proof_A` binds `A`'s identity to this request alone: it covers `ct_1`, whose secret only `A`
+  and `B` hold, and everything `A` says of itself.
+- `A` keeps `ss_1` and `h_1` until the request is answered, withdrawn or 30 days old.
+
+**Opening.** `B` takes `v_B` as the version of its own static key to decapsulate with, recomputes
+`h_1` with its own name and server, decrypts, and checks: the padding is zeros, `IK_A` is not its
+own, `sk_signature_A` and `proof_A` verify with `IK_A`, and `SK_A.pk` is a valid X-Wing key (FIPS
+203 check). It looks `name_A` up at `server_A` and shows the request only if the key it gets is
+`IK_A`. A request that fails any check is dropped without a word; so is one from a blocked contact.
+
+**Answers.** A user who declines drops the request; `A` is not told. A user who accepts makes `B`
+send the accept (§14.3). Requests are rate-limited at the server (§14.5); a request repeated by
+the same `IK_A` replaces the one shown.
+
+### 14.3 Mail
+
+Everything between contacts after the request travels as *mail*: `tag || body`, deposited at the
+recipient's server (§14.5) and padded to one of three sizes (M-4).
+
+```
+mail     = tag (32) || field (u32) || ct (1120) || ChaCha20-Poly1305(key, nonce = 12 zero bytes, aad = "", padded)
+tag      = nonce (16 random bytes) || HMAC-SHA-256(tag_key, "AirChat v1 mail-tag-mac" || nonce)[0..16]
+padded   = len (u16) || payload || zeros, making the mail exactly 2048, 4096 or 16384 bytes (the smallest that fits)
+```
+
+**Accept.** The first mail from `B` to `A` answers the request. `B` encapsulates to `SK_A`
+(version `v_A`) from the request:
+
+```
+tag_key  = HKDF(salt = "", ikm = ss_1, info = "AirChat v1 mail-accept-tag-key" || h_1)
+(ss_2, ct = ct_2) = X-Wing.Encaps(SK_A);  field = v_A
+h_2      = SHA-256("AirChat v1 mail-accept-hash" || h_1 || IK_A || v_A (u32) || ct_2)
+key      = HKDF(salt = "", ikm = ss_2, info = "AirChat v1 mail-accept-key" || h_2 || tag)
+payload  = Name(server_B) || Name(name_B) || IK_B || v_B' (u32) || SK_B'.pk (1216) || sk_signature_B (64)
+           || dk_B (32) || proof_B (64)
+proof_B  = Ed25519(IK_B, "AirChat v1 mail-accept-proof" || h_2 || all of the payload before it)
+psk      = HKDF(salt = ss_1, ikm = ss_2, info = "AirChat v1 mail-psk" || h_2)
+```
+
+`A` recognises the tag with the tag key of each request it has pending, decrypts, and checks that
+`IK_B` is the key it looked up, that `name_B` and `server_B` are those it asked for, and the
+signatures; `SK_B'` (version `v_B'`) is `B`'s newest static key, which may be newer than the one
+`A` was given. Both then hold `psk`, which needs both `ss_1` and `ss_2`: nobody learns it without
+both static keys used. `A` forgets `ss_1`; `B` forgets `ss_1` once it sent the accept.
+
+**Between contacts.** All other mail from `a` to `b` is sealed as an AirChat envelope body (§10.3)
+is, to one of `b`'s one-time prekeys or to `b`'s static key:
+
+```
+tag_key  = HKDF(salt = "", ikm = psk, info = "AirChat v1 mail-tag-key" || IK_a || IK_b)
+field    = the id of b's one-time prekey for a it is sealed to (§14.7); 0 for SK_b
+(ss, ct) = X-Wing.Encaps(that prekey's key, or SK_b)
+key      = HKDF(salt = psk, ikm = ss, info = "AirChat v1 mail-seal" || IK_a || IK_b || tag || field (u32))
+payload  = a §8.1 record of a kind below
+```
+
+- **Recognising.** The recipient checks the tag against the tag key of each contact (one HMAC
+  each, in constant time) and of each request it has pending; mail that matches none is taken from
+  the mailbox and dropped. Tags are new for every mail, so the server cannot tell two pieces of mail
+  from one sender apart from two senders' (M-3).
+- **Static keys.** Sealed to `SK_b`, mail is sealed to the newest static key of `b`'s that `a`
+  holds; `b` tries its own from the version `a` took last (§6.9).
+- **Kinds.** A payload is one of: text `0x01`, ack `0x02`, refused `0x05` (§8.1); prekeys `0x5a`
+  and prekeys wanted `0x5b` (§14.7); static key `0x5c` and static key taken `0x5d` (§6.9); and
+
+  ```
+  0x61 delivery key:  dk (32)        the sender's new delivery key (§14.4)
+  ```
+
+  Other kinds are ignored. Texts are acknowledged as on a link (§8.1), the ack sealed to `SK_a`.
+- **Replays.** The server can hand the same mail again. Opening mail sealed to a prekey deletes the
+  prekey (§14.7), so a copy no longer opens; texts are stored once per `message_id`, and the other
+  kinds are idempotent.
+
+### 14.4 Delivery keys
+
+Only contacts can leave mail for an account (C-5): every deposit shows the recipient's *delivery
+key* `dk`, 32 random bytes the recipient gives all its contacts alike, in its request or accept and
+later in mail of kind `0x61`. Its server keeps only `SHA-256("AirChat v1 mail-delivery-key" || dk)`,
+set on the session (§13.6, kind 5), and refuses mail that shows another key (failure `9`).
+
+- The server learns that a contact deposited, never which: all contacts show the same key (threat
+  model §7.4). A copy of the server's database is no key to deposit with.
+- **Blocking** a contact makes a new `dk`: the device sets it at its server at once, then mails it
+  to every other contact. Mail deposited with the old key is refused from then on; its sender keeps
+  it as sending and deposits it again once it has the new key.
+- `dk` travels inside TLS; the server sees it at every deposit. Seeing it lets the server do
+  nothing it could not anyway (fill its own mailbox).
+
+### 14.5 Deposits
+
+```
+0x82 deposit:          Name(name) || dk (32) || mail (2048, 4096 or 16384 bytes)
+0x83 deposit request:  Name(name) || request (4096)
+                       answers: 0x78 done, or failure 9 (no such account, or a wrong delivery key)
+```
+
+- A device deposits over a connection **not signed in**, also at its own server, so the deposit is
+  not tied to its account (threat model B2 says what the source address still shows).
+- The server keeps mail until the recipient's device takes it, and at most 30 days (M-5). It keeps
+  at most 50 requests per account and rate-limits deposits of requests per source; a request beyond
+  the limit is refused like an unknown name.
+- A deposit's answer is the same for an unknown name and a wrong key, and takes about as long.
+
+### 14.6 The mailbox connection
+
+A device signed in keeps one connection to its server open (N-1): a WebSocket on the server's
+mailbox endpoint, over TLS, each frame one binary WebSocket message.
+
+```
+server → device:  0x74 challenge (§13.5), once, on connecting
+device → server:  0x77 authorized (§13.6), kind 6, with that challenge's nonce
+server → device:  0x78 done, or a failure, after which it closes the connection
+server → device:  0x90 mail:     id (u64) || mail
+                  0x91 request:  id (u64) || request
+device → server:  0x92 taken:    id (u64)
+```
+
+- After *done* the server sends everything waiting for the account, then each new piece of mail or
+  request as it arrives. `id` is the server's own number for it.
+- The device sends *taken* once it has stored what came, or dropped it; the server then deletes it.
+  What is not taken is sent again on the next connection.
+- Signing in elsewhere (A-5) ends the session and closes the connection. Unknown frame kinds end it
+  too.
+
+### 14.7 Prekeys between contacts
+
+Contacts hand each other one-time prekeys inside mail, as AirChat contacts do over links (§10.7),
+with the same records (`0x5a`, `0x5b`) and the same rules for keeping, sealing and deleting, except
+when they are asked for:
+
+- Right after pairing, both sides ask for 24 (`0x5b`), the request's sender once it has opened the
+  accept, the other once it has sent it.
+- A device holding fewer than 8 unused prekeys of a contact asks for `24 −` the number it holds, at
+  most once a day while unanswered.
+- Prekey records are sealed to the recipient's static key; texts take the oldest unused prekey, and
+  `SK_b` when none is left.
+
+The server holds no prekeys, so it cannot hand out the same one twice nor count how fast they go.
+
+### 14.8 What a server learns
+
+From deposits: that a piece of mail or a request arrived for one of its accounts, when, its padded
+size, and the address it came from (§14.5) — never from whom. From lookups: which names are asked
+for, by which addresses. From the mailbox connection: when the account's device is online, how much
+it takes, and its address. Mail is ciphertext under keys only the two contacts derive; requests are
+sealed to the recipient's static key. The server keeps the newest static key and the delivery key's
+hash of each account, waiting mail and requests, nothing else (requirement S-4).
+
+### 14.9 Test vectors
+
+`tests/vectors/mail.json` holds a request and its accept between two accounts, the `psk` they
+derive, a text mailed to a prekey and its ack mailed to a static key, a delivery-key hash, and the
+deposit and mailbox frames; `check_mail.py` re-derives them from this section.

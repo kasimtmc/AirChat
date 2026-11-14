@@ -42,7 +42,9 @@ wildcards = "deny"
 allow-wildcard-paths = true
 
 [sources]
-# crates.io only: no git dependencies, no other registries.
+# crates.io, and the encrypted storage shared with AirChat+ (pinned to a tag); no other git
+# dependencies, no other registries.
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/kasimtmc/airchat-storage"]

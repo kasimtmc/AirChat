@@ -1,6 +1,6 @@
 //! Accounts at a server, for AirChat+ over the internet (docs/protocol.md §13): names, the auth key
 //! derived from a password, and the messages a device and its server exchange to register, sign in
-//! and act on a session.
+//! and act on a session; and the requests of §14 to the same endpoint: lookups and deposits.
 
 use crate::{
     crypto::{
@@ -12,6 +12,7 @@ use crate::{
     },
     identity::{Identity, PublicIdentity},
     labels,
+    mail::{self, DELIVERY_KEY_LEN, SignedStaticKey},
 };
 
 pub const SALT_LEN: usize = 16;
@@ -30,6 +31,10 @@ const SESSION: u8 = 0x76;
 const AUTHORIZED: u8 = 0x77;
 const DONE: u8 = 0x78;
 const FAILURE: u8 = 0x7f;
+const LOOKUP: u8 = 0x80;
+const KEYS: u8 = 0x81;
+const DEPOSIT: u8 = 0x82;
+const DEPOSIT_REQUEST: u8 = 0x83;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum AccountError {
@@ -287,6 +292,14 @@ pub enum Action {
         auth_key: SecretBytes<AUTH_KEY_LEN>,
         new: Rekey,
     },
+    /// The account's newest static key, for lookups (§14.1).
+    PublishStaticKey(SignedStaticKey),
+    /// The hash of the account's delivery key (§14.4).
+    SetDeliveryKey {
+        hash: [u8; 32],
+    },
+    /// The first frame of a mailbox connection (§14.6).
+    OpenMailbox,
 }
 
 /// `0x77 authorized` (§13.6). The server knows the identity key the token is bound to and checks
@@ -342,6 +355,15 @@ impl Authorized {
                 out.extend_from_slice(auth_key.expose());
                 new.encode(&mut out);
             }
+            Action::PublishStaticKey(key) => {
+                out.push(4);
+                key.encode(&mut out);
+            }
+            Action::SetDeliveryKey { hash } => {
+                out.push(5);
+                out.extend_from_slice(hash);
+            }
+            Action::OpenMailbox => out.push(6),
         }
         out
     }
@@ -350,11 +372,28 @@ impl Authorized {
 /// What a device sends its server.
 #[derive(Debug, Clone)]
 pub enum Request {
-    Prelogin { name: String },
+    Prelogin {
+        name: String,
+    },
     Register(Register),
     ChallengeRequest,
     SignIn(SignIn),
     Authorized(Authorized),
+    /// §14.1
+    Lookup {
+        name: String,
+    },
+    /// §14.5: `mail` is 2048, 4096 or 16384 bytes.
+    Deposit {
+        name: String,
+        delivery_key: SecretBytes<DELIVERY_KEY_LEN>,
+        mail: Vec<u8>,
+    },
+    /// §14.5: `request` is [`mail::REQUEST_LEN`] bytes.
+    DepositRequest {
+        name: String,
+        request: Vec<u8>,
+    },
 }
 
 impl Request {
@@ -369,12 +408,38 @@ impl Request {
             Self::ChallengeRequest => (CHALLENGE_REQUEST, Vec::new()),
             Self::SignIn(sign_in) => (SIGN_IN, sign_in.signed_fields()),
             Self::Authorized(authorized) => (AUTHORIZED, authorized.signed_fields()),
+            Self::Lookup { name } => {
+                let mut out = Vec::new();
+                put_name(&mut out, name);
+                (LOOKUP, out)
+            }
+            Self::Deposit {
+                name,
+                delivery_key,
+                mail,
+            } => {
+                let mut out = Vec::new();
+                put_name(&mut out, name);
+                out.extend_from_slice(delivery_key.expose());
+                out.extend_from_slice(mail);
+                (DEPOSIT, out)
+            }
+            Self::DepositRequest { name, request } => {
+                let mut out = Vec::new();
+                put_name(&mut out, name);
+                out.extend_from_slice(request);
+                (DEPOSIT_REQUEST, out)
+            }
         };
         match self {
             Self::Register(Register { signature, .. })
             | Self::SignIn(SignIn { signature, .. })
             | Self::Authorized(Authorized { signature, .. }) => body.extend_from_slice(signature),
-            Self::Prelogin { .. } | Self::ChallengeRequest => {}
+            Self::Prelogin { .. }
+            | Self::ChallengeRequest
+            | Self::Lookup { .. }
+            | Self::Deposit { .. }
+            | Self::DepositRequest { .. } => {}
         }
         [&[VERSION, kind][..], &body].concat()
     }
@@ -415,10 +480,41 @@ impl Request {
                         auth_key: reader.secret()?,
                         new: Rekey::decode(&mut reader)?,
                     },
+                    4 => Action::PublishStaticKey(
+                        SignedStaticKey::decode(reader.take(mail::SIGNED_STATIC_KEY_LEN)?)
+                            .ok_or(AccountError::Malformed)?,
+                    ),
+                    5 => Action::SetDeliveryKey { hash: reader.array()? },
+                    6 => Action::OpenMailbox,
                     _ => return Err(AccountError::Malformed),
                 },
                 signature: reader.array()?,
             }),
+            LOOKUP => Self::Lookup { name: reader.name()? },
+            DEPOSIT => {
+                let name = reader.name()?;
+                let delivery_key = reader.secret()?;
+                let mail = reader.rest();
+                if !mail::MAIL_SIZES.contains(&mail.len()) {
+                    return Err(AccountError::Malformed);
+                }
+                Self::Deposit {
+                    name,
+                    delivery_key,
+                    mail: mail.to_vec(),
+                }
+            }
+            DEPOSIT_REQUEST => {
+                let name = reader.name()?;
+                let request = reader.rest();
+                if request.len() != mail::REQUEST_LEN {
+                    return Err(AccountError::Malformed);
+                }
+                Self::DepositRequest {
+                    name,
+                    request: request.to_vec(),
+                }
+            }
             _ => return Err(AccountError::Malformed),
         };
         reader.end()?;
@@ -437,6 +533,8 @@ pub enum Failure {
     InvalidName = 6,
     ParamsRefused = 7,
     SessionRefused = 8,
+    /// No such account, or a wrong delivery key (§14).
+    Refused = 9,
 }
 
 impl Failure {
@@ -450,6 +548,7 @@ impl Failure {
             6 => Self::InvalidName,
             7 => Self::ParamsRefused,
             8 => Self::SessionRefused,
+            9 => Self::Refused,
             _ => return Err(AccountError::Malformed),
         })
     }
@@ -473,6 +572,11 @@ pub enum Answer {
     Failure {
         failure: Failure,
         retry_after: u32,
+    },
+    /// An account's keys (§14.1).
+    Keys {
+        identity: PublicIdentity,
+        static_key: SignedStaticKey,
     },
 }
 
@@ -500,6 +604,11 @@ impl Answer {
                 out.push(*failure as u8);
                 out.extend_from_slice(&retry_after.to_be_bytes());
             }
+            Self::Keys { identity, static_key } => {
+                out.push(KEYS);
+                out.extend_from_slice(identity.as_bytes());
+                static_key.encode(&mut out);
+            }
         }
         out
     }
@@ -525,6 +634,11 @@ impl Answer {
                 failure: Failure::from_code(reader.u8()?)?,
                 retry_after: reader.u32()?,
             },
+            KEYS => Self::Keys {
+                identity: PublicIdentity::from_bytes(reader.array()?),
+                static_key: SignedStaticKey::decode(reader.take(mail::SIGNED_STATIC_KEY_LEN)?)
+                    .ok_or(AccountError::Malformed)?,
+            },
             _ => return Err(AccountError::Malformed),
         };
         reader.end()?;
@@ -532,7 +646,7 @@ impl Answer {
     }
 }
 
-fn put_name(out: &mut Vec<u8>, name: &str) {
+pub(crate) fn put_name(out: &mut Vec<u8>, name: &str) {
     // Checked names are at most 253 bytes.
     out.push(u8::try_from(name.len()).unwrap_or(u8::MAX));
     out.extend_from_slice(name.as_bytes());
@@ -562,10 +676,10 @@ fn verify(
         .is_ok()
 }
 
-struct Reader<'a>(&'a [u8]);
+pub(crate) struct Reader<'a>(pub(crate) &'a [u8]);
 
 impl<'a> Reader<'a> {
-    fn take(&mut self, len: usize) -> Result<&'a [u8], AccountError> {
+    pub(crate) fn take(&mut self, len: usize) -> Result<&'a [u8], AccountError> {
         if self.0.len() < len {
             return Err(AccountError::Malformed);
         }
@@ -574,21 +688,21 @@ impl<'a> Reader<'a> {
         Ok(head)
     }
 
-    fn u8(&mut self) -> Result<u8, AccountError> {
+    pub(crate) fn u8(&mut self) -> Result<u8, AccountError> {
         Ok(self.take(1)?[0])
     }
 
-    fn u32(&mut self) -> Result<u32, AccountError> {
+    pub(crate) fn u32(&mut self) -> Result<u32, AccountError> {
         Ok(u32::from_be_bytes(self.array()?))
     }
 
-    fn array<const N: usize>(&mut self) -> Result<[u8; N], AccountError> {
+    pub(crate) fn array<const N: usize>(&mut self) -> Result<[u8; N], AccountError> {
         let mut out = [0; N];
         out.copy_from_slice(self.take(N)?);
         Ok(out)
     }
 
-    fn secret<const N: usize>(&mut self) -> Result<SecretBytes<N>, AccountError> {
+    pub(crate) fn secret<const N: usize>(&mut self) -> Result<SecretBytes<N>, AccountError> {
         SecretBytes::from_slice(self.take(N)?).map_err(|_| AccountError::Malformed)
     }
 
@@ -600,7 +714,7 @@ impl<'a> Reader<'a> {
     }
 
     /// A name: decoded as a name of §13.1, so nothing else gets through.
-    fn name(&mut self) -> Result<String, AccountError> {
+    pub(crate) fn name(&mut self) -> Result<String, AccountError> {
         let len = usize::from(self.u8()?);
         let bytes = self.take(len)?;
         let name = std::str::from_utf8(bytes).map_err(|_| AccountError::Malformed)?;
@@ -608,7 +722,20 @@ impl<'a> Reader<'a> {
         Ok(name.to_owned())
     }
 
-    fn end(&self) -> Result<(), AccountError> {
+    /// A server's name (§13.1).
+    pub(crate) fn server(&mut self) -> Result<String, AccountError> {
+        let len = usize::from(self.u8()?);
+        let bytes = self.take(len)?;
+        let server = std::str::from_utf8(bytes).map_err(|_| AccountError::Malformed)?;
+        check_server(server)?;
+        Ok(server.to_owned())
+    }
+
+    pub(crate) fn rest(&mut self) -> &'a [u8] {
+        std::mem::take(&mut self.0)
+    }
+
+    pub(crate) fn end(&self) -> Result<(), AccountError> {
         if self.0.is_empty() {
             Ok(())
         } else {

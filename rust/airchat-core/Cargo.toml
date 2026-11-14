@@ -12,6 +12,7 @@ fuzzing = ["airchat-protocol/fuzzing"]
 
 [dependencies]
 airchat-protocol.workspace = true
+airchat-storage.workspace = true
 rusqlite.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true

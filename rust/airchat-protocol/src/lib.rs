@@ -1,6 +1,6 @@
 //! The AirChat protocol: identities, pairing, link sessions, messages, groups, the mesh,
-//! walkie-talkie channels and paths, as specified in `docs/protocol.md`, and the cryptography
-//! they use.
+//! walkie-talkie channels and paths, and AirChat+'s accounts and mail, as specified in
+//! `docs/protocol.md`, and the cryptography they use.
 //!
 //! Formats and cryptography only: no storage, no transports, no platform code. An application
 //! keeps the state these functions take and return, and carries their bytes.
@@ -19,6 +19,7 @@ pub mod group;
 pub mod identity;
 pub mod labels;
 pub mod link;
+pub mod mail;
 pub mod mesh;
 pub mod pairing;
 pub mod path;

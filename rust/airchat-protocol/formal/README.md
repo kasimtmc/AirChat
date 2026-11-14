@@ -10,6 +10,7 @@ device's long-term keys at any time; a lemma states what it still cannot do.
 | [`pairing.spthy`](pairing.spthy) | Pairing (§4.3) in all three modes: QR invites (§4.4), Nearby Pairing with emoji (§4.5), adding by AirChat ID (§4.8); contact cards (§4.6) |
 | [`group.spthy`](group.spthy) | Group keys: updates (§9.2) and messages (§9.3) of a group of three whose admin removes one member |
 | [`mesh.spthy`](mesh.spthy) | 1:1 mesh envelopes (§10.3) and one-time prekeys (§10.7) |
+| [`mail.spthy`](mail.spthy) | AirChat+ contact requests and accepts (§14.2, §14.3), the pairing secret they give, and mail between the contacts |
 
 ## Running
 
@@ -22,6 +23,7 @@ MAUDE_LIB=/usr/share/maude tamarin-prover --prove link.spthy
 MAUDE_LIB=/usr/share/maude tamarin-prover --prove pairing.spthy
 MAUDE_LIB=/usr/share/maude tamarin-prover --derivcheck-timeout=0 --prove group.spthy
 MAUDE_LIB=/usr/share/maude tamarin-prover --prove mesh.spthy
+MAUDE_LIB=/usr/share/maude tamarin-prover --prove mail.spthy
 ```
 
 On a system with a Turkish locale, set `LC_ALL=C.UTF-8` (Tamarin reads the models as UTF-8, and

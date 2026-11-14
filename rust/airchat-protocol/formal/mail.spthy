@@ -1,0 +1,213 @@
+theory AirChatPlusMail
+begin
+
+/*
+ * Contact requests and mail between AirChat+ accounts (docs/protocol.md §14.2, §14.3), in the
+ * symbolic (Dolev-Yao) model. Servers are the adversary's: they see, drop, replay and make every
+ * request and piece of mail; the adversary may also learn any account's identity key or static
+ * key at any time.
+ *
+ * Abstractions, beyond those of link.spthy (ideal KEM, KDFs, AEAD and MAC):
+ * - An account's name and server are one public name `$A`. Looking a name up (§14.1) gives its
+ *   true identity key and a static key it signed: the server answers honestly here. A server that
+ *   lies about keys is caught by key transparency, a later stage's model.
+ * - Each account has one static key; versions, padding, lengths and the delivery key are left out
+ *   (the delivery key protects the server from strangers, not the contacts from anyone).
+ * - Mail between contacts is sealed to the recipient's static key; mesh.spthy proves sealing to
+ *   one-time prekeys, given the pairing secret, and it is the same construction (§10.3, §14.3).
+ * - Tags are a nonce and a MAC, the MAC a hash of the tag key and the nonce.
+ */
+
+builtins: hashing, signing
+
+functions: kempk/1, kemenc/2, kemdec/2,
+           kdf/3,
+           aead/4, adec/4
+
+equations: kemdec(kemenc(ss, kempk(sk)), sk) = ss,
+           adec(k, n, ad, aead(k, n, ad, p)) = p
+
+restriction one_account_each:
+  "All A #i #j. Account(A) @ i & Account(A) @ j ==> #i = #j"
+
+restriction not_with_oneself:
+  "All a b #i. Neq(a, b) @ i ==> not (a = b)"
+
+restriction equal:
+  "All a b #i. Eq(a, b) @ i ==> a = b"
+
+rule Account:
+    [ Fr(~ik), Fr(~sk) ]
+  --[ Account($A), IdentityKey($A, ~ik), StaticKey($A, ~sk) ]->
+    [ !Ik($A, ~ik), !Static($A, ~sk),
+      !Lookup($A, pk(~ik), kempk(~sk), sign(<'AirChat v1 static-key', kempk(~sk)>, ~ik)),
+      Out(<$A, pk(~ik), kempk(~sk)>) ]
+
+rule Reveal_identity_key:
+    [ !Ik(A, ik) ]
+  --[ RevIdentity(A) ]->
+    [ Out(ik) ]
+
+rule Reveal_static_key:
+    [ !Static(A, sk) ]
+  --[ RevStatic(A) ]->
+    [ Out(sk) ]
+
+/* §14.2: A asks to become B's contact. */
+
+rule Request:
+  let ct1   = kemenc(~ss1, pkSKB)
+      h1    = h(<'AirChat v1 mail-request-hash', $B, pkIKB, pkSKB, ct1>)
+      k1    = kdf('nosalt', ~ss1, <'AirChat v1 mail-request-key', h1>)
+      inner = <$A, pk(ikA), kempk(skA), sign(<'AirChat v1 static-key', kempk(skA)>, ikA)>
+      proof = sign(<'AirChat v1 mail-request-proof', h1, inner>, ikA)
+  in
+    [ !Ik($A, ikA), !Static($A, skA), !Lookup($B, pkIKB, pkSKB, sigB), Fr(~ss1) ]
+  --[ Neq($A, $B), Requested($A, $B, h1), Encap(~ss1, pkSKB, $B) ]->
+    [ Pending($A, $B, ~ss1, h1, pkIKB), Out(<ct1, aead(k1, '0', 'noaad', <inner, proof>)>) ]
+
+/* B opens it, checks who asks against a lookup of the name, and its user accepts. */
+
+rule Accept:
+  let ct1     = kemenc(ss1, kempk(skB))
+      h1      = h(<'AirChat v1 mail-request-hash', $B, pk(ikB), kempk(skB), ct1>)
+      k1      = kdf('nosalt', ss1, <'AirChat v1 mail-request-key', h1>)
+      inner   = <$A, pkIKA, pkSKA, sigA>
+      tagkey  = kdf('nosalt', ss1, <'AirChat v1 mail-accept-tag-key', h1>)
+      tag     = <~n, h(<tagkey, ~n>)>
+      ct2     = kemenc(~ss2, pkSKA)
+      h2      = h(<'AirChat v1 mail-accept-hash', h1, pkIKA, ct2>)
+      key     = kdf('nosalt', ~ss2, <'AirChat v1 mail-accept-key', h2, tag>)
+      payload = <$B, pk(ikB), kempk(skB), sign(<'AirChat v1 static-key', kempk(skB)>, ikB)>
+      proofB  = sign(<'AirChat v1 mail-accept-proof', h2, payload>, ikB)
+      psk     = kdf(ss1, ~ss2, <'AirChat v1 mail-psk', h2>)
+  in
+    [ !Ik($B, ikB), !Static($B, skB), !Lookup($A, pkIKA, pkSKAnow, sigAnow),
+      In(<ct1, aead(k1, '0', 'noaad', <inner, proofA>)>), Fr(~ss2), Fr(~n) ]
+  --[ Neq($A, $B),
+      Eq(verify(proofA, <'AirChat v1 mail-request-proof', h1, inner>, pkIKA), true),
+      Eq(verify(sigA, <'AirChat v1 static-key', pkSKA>, pkIKA), true),
+      AcceptedRequest($B, $A, h1), Accepted($B, $A, h2, psk), Encap(~ss2, pkSKA, $A) ]->
+    [ !Contact($B, $A, psk), Out(<tag, ct2, aead(key, '0', 'noaad', <payload, proofB>)>) ]
+
+/* A recognises the accept by its tag and completes; the request is answered once. */
+
+rule Complete:
+  let tagkey  = kdf('nosalt', ss1, <'AirChat v1 mail-accept-tag-key', h1>)
+      tag     = <n, h(<tagkey, n>)>
+      ct2     = kemenc(ss2, kempk(skA))
+      h2      = h(<'AirChat v1 mail-accept-hash', h1, pk(ikA), ct2>)
+      key     = kdf('nosalt', ss2, <'AirChat v1 mail-accept-key', h2, tag>)
+      payload = <$B, pkIKB, pkSKB, sigB>
+      psk     = kdf(ss1, ss2, <'AirChat v1 mail-psk', h2>)
+  in
+    [ Pending($A, $B, ss1, h1, pkIKB), !Ik($A, ikA), !Static($A, skA),
+      In(<tag, ct2, aead(key, '0', 'noaad', <payload, proofB>)>) ]
+  --[ Eq(verify(proofB, <'AirChat v1 mail-accept-proof', h2, payload>, pkIKB), true),
+      Eq(verify(sigB, <'AirChat v1 static-key', pkSKB>, pkIKB), true),
+      Completed($A, $B, h2, psk) ]->
+    [ !Contact($A, $B, psk) ]
+
+/* §14.3: mail between contacts, sealed to the recipient's static key and the pairing secret. */
+
+rule Send_mail:
+  let tagkey = kdf('nosalt', psk, <'AirChat v1 mail-tag-key', $A, $B>)
+      tag    = <~n, h(<tagkey, ~n>)>
+      ct     = kemenc(~ss, pkSKB)
+      key    = kdf(psk, ~ss, <'AirChat v1 mail-seal', $A, $B, tag>)
+  in
+    [ !Contact($A, $B, psk), !Lookup($B, pkIKB, pkSKB, sigB), Fr(~n), Fr(~ss), Fr(~text) ]
+  --[ SentMail($A, $B, ~text, psk), Encap(~ss, pkSKB, $B) ]->
+    [ Out(<tag, ct, aead(key, '0', 'noaad', ~text)>) ]
+
+rule Receive_mail:
+  let tagkey = kdf('nosalt', psk, <'AirChat v1 mail-tag-key', $A, $B>)
+      tag    = <n, h(<tagkey, n>)>
+      ct     = kemenc(ss, kempk(skB))
+      key    = kdf(psk, ss, <'AirChat v1 mail-seal', $A, $B, tag>)
+  in
+    [ !Contact($B, $A, psk), !Static($B, skB), In(<tag, ct, aead(key, '0', 'noaad', text)>) ]
+  --[ ReceivedMail($B, $A, text, psk) ]->
+    [ ]
+
+/* Helpers, proved first and then used. */
+
+lemma identity_keys_secret [reuse]:
+  "All A ik #i #k. IdentityKey(A, ik) @ i & K(ik) @ k ==> Ex #r. RevIdentity(A) @ r & r < k"
+
+lemma static_keys_secret [reuse]:
+  "All A sk #i #k. StaticKey(A, sk) @ i & K(sk) @ k ==> Ex #r. RevStatic(A) @ r & r < k"
+
+/*
+ * A secret encapsulated to an account's key is learnt only with that static key, or, when the key
+ * came from a request, if the account's identity key leaked and signed a key of the adversary's.
+ */
+lemma encapsulated_secrets [reuse]:
+  "All ss pk A #i #k. Encap(ss, pk, A) @ i & K(ss) @ k ==>
+     (Ex sk #j #r. StaticKey(A, sk) @ j & pk = kempk(sk) & RevStatic(A) @ r & r < k)
+     | (Ex #r. RevIdentity(A) @ r & r < k)"
+
+/* Sanity: two accounts become contacts and mail each other, nothing revealed. */
+
+lemma executable:
+  exists-trace
+  "Ex A B h2 psk t #i #j #s #r. Accepted(B, A, h2, psk) @ i & Completed(A, B, h2, psk) @ j
+     & SentMail(A, B, t, psk) @ s & ReceivedMail(B, A, t, psk) @ r
+     & not (Ex X #x. RevIdentity(X) @ x) & not (Ex X #x. RevStatic(X) @ x)"
+
+/*
+ * The pairing secret needs both encapsulated secrets: for A, who encapsulated to B's true static
+ * key, nobody learns it without B's static key, and then also A's static key or B's identity key
+ * (to send a forged accept). For B the same holds, with A's identity key for a forged request.
+ */
+
+lemma psk_secret_for_requester [reuse]:
+  "All A B h2 psk #i #k. Completed(A, B, h2, psk) @ i & K(psk) @ k ==>
+     (Ex #r. RevStatic(B) @ r) & ((Ex #r. RevStatic(A) @ r) | (Ex #r. RevIdentity(B) @ r))"
+
+lemma psk_secret_for_accepter [reuse]:
+  "All A B h2 psk #i #k. Accepted(B, A, h2, psk) @ i & K(psk) @ k ==>
+     (Ex #r. RevIdentity(A) @ r)
+     | ((Ex #r. RevStatic(A) @ r) & (Ex #r. RevStatic(B) @ r))"
+
+/*
+ * Authentication: B accepts a request as A's only if A made it, and A completes with B only if B
+ * accepted that very request, with the same transcript and secret, unless the claimed party's
+ * identity key leaked first. A completes each accept once.
+ */
+
+lemma requests_authentic:
+  "All A B h1 #j. AcceptedRequest(B, A, h1) @ j ==>
+     (Ex #i. Requested(A, B, h1) @ i & i < j) | (Ex #r. RevIdentity(A) @ r & r < j)"
+
+lemma accepts_authentic:
+  "All A B h2 psk #j. Completed(A, B, h2, psk) @ j ==>
+     (Ex #i. Accepted(B, A, h2, psk) @ i & i < j) | (Ex #r. RevIdentity(B) @ r & r < j)"
+
+lemma accepts_completed_once:
+  "All A B h2 psk #i #j. Completed(A, B, h2, psk) @ i & Completed(A, B, h2, psk) @ j ==> #i = #j"
+
+/*
+ * Mail: only the two contacts read it, and what B takes as from A, A sent, unless the pairing
+ * secret could be known: both static keys, or an identity key, leaked (the lemmas above). The
+ * servers never learn a tag key, so they cannot tell whose mail it is (M-3).
+ */
+
+lemma mail_secret:
+  "All A B t psk #i #k. SentMail(A, B, t, psk) @ i & K(t) @ k ==>
+     (Ex #r. RevIdentity(A) @ r) | (Ex #r. RevIdentity(B) @ r)
+     | ((Ex #r. RevStatic(A) @ r) & (Ex #r. RevStatic(B) @ r))"
+
+lemma mail_authentic:
+  "All A B t psk #j. ReceivedMail(B, A, t, psk) @ j ==>
+     (Ex #i. SentMail(A, B, t, psk) @ i & i < j)
+     | (Ex #r. RevIdentity(A) @ r & r < j) | (Ex #r. RevIdentity(B) @ r & r < j)
+     | ((Ex #r. RevStatic(A) @ r & r < j) & (Ex #r. RevStatic(B) @ r & r < j))"
+
+lemma tag_keys_secret:
+  "All A B t psk #i #k. SentMail(A, B, t, psk) @ i
+     & K(kdf('nosalt', psk, <'AirChat v1 mail-tag-key', A, B>)) @ k ==>
+     (Ex #r. RevIdentity(A) @ r) | (Ex #r. RevIdentity(B) @ r)
+     | ((Ex #r. RevStatic(A) @ r) & (Ex #r. RevStatic(B) @ r))"
+
+end

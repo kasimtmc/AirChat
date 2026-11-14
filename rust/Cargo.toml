@@ -13,6 +13,8 @@ publish = false
 [workspace.dependencies]
 airchat-core = { path = "airchat-core" }
 airchat-protocol = { path = "airchat-protocol" }
+# Vault, SQLCipher database and encrypted files, shared with AirChat+.
+airchat-storage = { git = "https://github.com/kasimtmc/airchat-storage", tag = "v0.1.0" }
 uniffi = "0.32.2"
 
 thiserror = "2.0.21"
@@ -34,3 +36,8 @@ lto = true
 codegen-units = 1
 # Symbols are kept here on purpose: uniffi-bindgen reads its metadata from the built library.
 # The Android Gradle plugin strips the libraries when packaging the APK.
+
+# airchat-storage depends on a tag of kasimtmc/airchat-protocol; this workspace's in-tree copy is the
+# same code (kept identical), so everything builds against the one copy.
+[patch."https://github.com/kasimtmc/airchat-protocol"]
+airchat-protocol = { path = "airchat-protocol" }

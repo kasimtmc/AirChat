@@ -3181,6 +3181,8 @@ impl Node {
                 | ChatMessage::GroupAck { .. }
                 | ChatMessage::GroupLeave { .. }),
             ) => actions.extend(self.on_group_record(connection, contact, session, record)?),
+            // AirChat+ mail only (§14.4), never on a link.
+            Some(ChatMessage::DeliveryKey(_)) => {}
             None => {}
         }
         Ok(actions)
@@ -3393,7 +3395,7 @@ mod tests {
 
     use super::*;
     use crate::discovery::PRESENCE_TOKEN_LEN;
-    use crate::storage::vault::tests::TEST_PARAMS;
+    use crate::storage::tests::TEST_PARAMS;
 
     struct Device {
         node: Node,

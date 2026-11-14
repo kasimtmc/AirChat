@@ -9,7 +9,7 @@
 use std::sync::OnceLock;
 
 use crate::{
-    account::{Answer, Request},
+    account::{Action, Answer, Request},
     channel::{Channel, Hello},
     chat::ChatMessage,
     crypto::{SecretBytes, kem::DecapsulationKey},
@@ -19,6 +19,7 @@ use crate::{
     link::{
         self, ChannelInitiator, ChannelKeys, ChannelResponder, Flavor, Initiator, LocalKeys, RemoteKeys, Responder,
     },
+    mail::{self, DeviceFrame, Peer, PendingRequest, ServerFrame, SignedStaticKey},
     mesh::{self, Envelope, Pair, UpdatePart},
     pairing::{self, LocalProfile, Pairing, ScannedInvite},
 };
@@ -122,8 +123,15 @@ pub fn account_request(data: &[u8]) {
         }
         Request::Authorized(authorized) => {
             let _ = authorized.verify(&keys().identity.public(), "chat.example.org");
+            if let Action::PublishStaticKey(key) = &authorized.action {
+                let _ = key.vouched_by(&keys().identity.public());
+            }
         }
-        Request::Prelogin { .. } | Request::ChallengeRequest => {}
+        Request::Prelogin { .. }
+        | Request::ChallengeRequest
+        | Request::Lookup { .. }
+        | Request::Deposit { .. }
+        | Request::DepositRequest { .. } => {}
     }
 }
 
@@ -131,6 +139,53 @@ pub fn account_request(data: &[u8]) {
 pub fn account_answer(data: &[u8]) {
     if let Ok(answer) = Answer::decode(data) {
         assert_eq!(answer.encode(), data);
+    }
+}
+
+/// A contact request (§14.2), as its recipient opens it.
+pub fn mail_request(data: &[u8]) {
+    let keys = keys();
+    let _ = mail::requested_version(data);
+    let _ = mail::open_request(&keys.identity.public(), "chat.example.org", "ayse", &keys.kem, data);
+}
+
+/// Mail (§14.3), as its recipient reads it: from a contact, or the accept of a request it sent.
+pub fn mail(data: &[u8]) {
+    let keys = keys();
+    let (own, them) = (keys.identity.public(), keys.other.public());
+    let pair = Pair {
+        from: &them,
+        to: &own,
+        psk: &keys.secret,
+    };
+    if let Ok(tag_key) = mail::tag_key(&pair) {
+        let _ = mail::tag_matches(&tag_key, data);
+    }
+    let _ = mail::sealed_to(data);
+    let _ = mail::open(&pair, &keys.kem, data);
+    let pending = PendingRequest {
+        to: Peer {
+            server: "chat.example.org".into(),
+            name: "burak".into(),
+            identity: them,
+            static_key: SignedStaticKey::new(&keys.other, 1, keys.other_kem.encapsulation_key()),
+        },
+        secret: keys.secret.clone(),
+        transcript: [7; 32],
+    };
+    let _ = mail::is_accept(&pending, data);
+    let _ = mail::open_accept(&own, &keys.kem, &pending, data);
+}
+
+/// The frames of a mailbox connection (§14.6), each side's as the other reads them.
+pub fn mailbox_frames(data: &[u8]) {
+    for frame in frames(data) {
+        if let Ok(decoded) = ServerFrame::decode(frame) {
+            assert_eq!(decoded.encode(), frame);
+        }
+        if let Ok(decoded) = DeviceFrame::decode(frame) {
+            assert_eq!(decoded.encode(), frame);
+        }
     }
 }
 
@@ -445,6 +500,9 @@ mod tests {
         attestation: 5_000,
         account_request: 10_000,
         account_answer: 10_000,
+        mail_request: 2_000,
+        mail: 2_000,
+        mailbox_frames: 10_000,
     }
 
     /// Writes the seeds where libFuzzer starts from, `fuzz/corpus/<target>/` (see
@@ -467,6 +525,9 @@ mod tests {
             "handshake_answer",
             "handshake_last",
             "attestation",
+            "mail_request",
+            "mail",
+            "mailbox_frames",
         ];
         for target in decoders {
             let dir = format!("{}/fuzz/corpus/{target}", env!("CARGO_MANIFEST_DIR"));

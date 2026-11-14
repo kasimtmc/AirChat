@@ -3,12 +3,13 @@
 pub mod channels;
 mod contacts;
 mod database;
-pub mod files;
 pub mod groups;
 mod messages;
 pub mod prekeys;
 pub mod requests;
-pub mod vault;
+
+/// The key hierarchy, encrypted files and the database engine are shared with AirChat+.
+pub use airchat_storage::{StorageError, files, vault};
 
 pub use contacts::{ContactId, ContactState, ContactSummary, DirectoryEntry, Permissions, StoredContact};
 pub use database::{Database, IdentityKeys, StaticKeySeed};
@@ -18,20 +19,14 @@ pub use messages::{
 };
 pub use vault::{UNLOCK_SECRET_LEN, Vault, VaultError};
 
-use crate::crypto::CryptoError;
+#[cfg(test)]
+pub(crate) mod tests {
+    use crate::crypto::pin::PinParams;
 
-#[derive(Debug, thiserror::Error)]
-pub enum StorageError {
-    #[error("the database key is wrong")]
-    WrongKey,
-    #[error("the database was created by a newer version of AirChat")]
-    NewerSchema,
-    #[error("database error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
-    #[error(transparent)]
-    Crypto(#[from] CryptoError),
-    #[error("file error: {0}")]
-    Io(String),
-    #[error("the database is inconsistent")]
-    Corrupt,
+    /// Fast Argon2id parameters, for tests only.
+    pub(crate) const TEST_PARAMS: PinParams = PinParams {
+        memory_kib: 64,
+        iterations: 1,
+        parallelism: 1,
+    };
 }

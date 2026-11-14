@@ -1472,7 +1472,7 @@ pub(super) mod tests {
         storage::{
             AttachmentState,
             groups::{GroupMessageStatus, group_file},
-            vault::tests::TEST_PARAMS,
+            tests::TEST_PARAMS,
         },
     };
 

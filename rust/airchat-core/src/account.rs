@@ -124,7 +124,7 @@ impl Account {
             Ok::<_, AccountError>((db, identity, keys, inbox_key))
         })();
         let (db, identity, keys, inbox_key) = created.inspect_err(|_| remove_database(dir))?;
-        let files = FileStore::new(dir.join(FILES_DIR), vault.file_key().map_err(StorageError::from)?);
+        let files = FileStore::new(dir.join(FILES_DIR), &vault)?;
         let account = Self {
             dir: dir.to_owned(),
             vault,
@@ -163,7 +163,7 @@ impl Account {
         let (identity, display_name) = db.identity()?.ok_or(AccountError::MissingIdentity)?;
         let keys = Self::load_or_create_keys(&db, &identity)?;
         let inbox_key = Self::load_or_create_inbox_key(&db)?;
-        let files = FileStore::new(dir.join(FILES_DIR), vault.file_key().map_err(StorageError::from)?);
+        let files = FileStore::new(dir.join(FILES_DIR), &vault)?;
         // Files the app was still writing when it died are of no use.
         for file in db.unfinished_files()? {
             files.delete(file)?;
@@ -739,7 +739,7 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::vault::tests::TEST_PARAMS;
+    use crate::storage::tests::TEST_PARAMS;
 
     #[test]
     fn create_lock_and_unlock() {

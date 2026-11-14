@@ -16,6 +16,7 @@ name = "airchat-core"
 version = "0.1.0"
 dependencies = [
  "airchat-protocol",
+ "airchat-storage",
  "rusqlite",
  "tempfile",
  "thiserror",
@@ -34,7 +35,7 @@ dependencies = [
 
 [[package]]
 name = "airchat-protocol"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "argon2",
  "getrandom 0.4.3",
@@ -50,6 +51,17 @@ dependencies = [
  "subtle",
  "thiserror",
  "x-wing",
+ "zeroize",
+]
+
+[[package]]
+name = "airchat-storage"
+version = "0.1.0"
+source = "git+https://github.com/kasimtmc/airchat-storage?tag=v0.1.0#3b7131d35d35cd82c476dc92f090cd761070a9d5"
+dependencies = [
+ "airchat-protocol",
+ "rusqlite",
+ "thiserror",
  "zeroize",
 ]
 

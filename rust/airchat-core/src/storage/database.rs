@@ -5,6 +5,8 @@ use std::path::Path;
 use rusqlite::{Connection, OptionalExtension, params};
 use zeroize::Zeroizing;
 
+use airchat_storage::database::{Migration, MigrationStep};
+
 use super::{StorageError, vault::Vault};
 use crate::{crypto::SecretBytes, identity::Identity};
 
@@ -296,6 +298,18 @@ const MIGRATIONS: &[&str] = &[
 /// The migration after which stored rosters list their members' static key versions.
 const ROSTER_KEY_VERSIONS: usize = 15;
 
+/// [`MIGRATIONS`] as the storage engine takes them: the roster rewrite runs with migration 15.
+fn migrations() -> Vec<Migration> {
+    MIGRATIONS
+        .iter()
+        .enumerate()
+        .map(|(index, sql)| Migration {
+            sql,
+            then: (index + 1 == ROSTER_KEY_VERSIONS).then_some(add_key_versions_to_rosters as MigrationStep),
+        })
+        .collect()
+}
+
 /// Rewrites the rosters stored before members' static keys had versions (§9.1), giving each
 /// member version 0.
 fn add_key_versions_to_rosters(tx: &rusqlite::Transaction) -> Result<(), StorageError> {
@@ -330,67 +344,18 @@ pub struct Database {
 }
 
 impl Database {
-    /// Opens (or creates) the database at `path` with the vault's key.
+    /// Opens (or creates) the database at `path` with the vault's key, and brings it up to date
+    /// (airchat-storage: SQLCipher with a raw key, memory security, secure delete, WAL).
     pub fn open(path: &Path, vault: &Vault) -> Result<Self, StorageError> {
-        let conn = Connection::open(path)?;
-        let key = vault.database_key()?;
-        // SQLCipher raw-key syntax: the key is used as is, without SQLCipher's own PBKDF2.
-        let pragma = Zeroizing::new(format!("x'{}'", hex(&key).as_str()));
-        conn.pragma_update(None, "key", pragma.as_str())?;
-
-        // A wrong key only shows up on the first read.
-        if let Err(e) = conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(())) {
-            return Err(match e.sqlite_error_code() {
-                Some(rusqlite::ErrorCode::NotADatabase) => StorageError::WrongKey,
-                _ => e.into(),
-            });
-        }
-
-        // Wipe SQLite's heap allocations when freed, keep temporary data in memory, and overwrite
-        // deleted rows.
-        conn.pragma_update(None, "cipher_memory_security", "ON")?;
-        conn.pragma_update(None, "temp_store", "MEMORY")?;
-        conn.pragma_update(None, "secure_delete", "ON")?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-
-        let mut db = Self { conn };
-        db.migrate()?;
-        Ok(db)
+        Ok(Self {
+            conn: airchat_storage::database::open(path, vault, &migrations())?,
+        })
     }
 
-    /// Applies the migrations not applied yet. Foreign keys are off meanwhile, so a table can be
-    /// rebuilt without cascading deletes (the procedure SQLite documents for schema changes), and
-    /// checked before each commit.
+    /// Applies the migrations not applied yet, to a connection made by hand in tests.
+    #[cfg(test)]
     fn migrate(&mut self) -> Result<(), StorageError> {
-        let applied: i64 = self.conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        let applied = usize::try_from(applied).map_err(|_| StorageError::NewerSchema)?;
-        if applied > MIGRATIONS.len() {
-            return Err(StorageError::NewerSchema);
-        }
-        if applied == MIGRATIONS.len() {
-            return Ok(());
-        }
-        self.conn.pragma_update(None, "foreign_keys", "OFF")?;
-        let migrated = (|| {
-            for (index, migration) in MIGRATIONS.iter().enumerate().skip(applied) {
-                let tx = self.conn.transaction()?;
-                tx.execute_batch(migration)?;
-                if index + 1 == ROSTER_KEY_VERSIONS {
-                    add_key_versions_to_rosters(&tx)?;
-                }
-                let violations: i64 =
-                    tx.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| row.get(0))?;
-                if violations > 0 {
-                    return Err(StorageError::Corrupt);
-                }
-                tx.pragma_update(None, "user_version", index as i64 + 1)?;
-                tx.commit()?;
-            }
-            Ok(())
-        })();
-        self.conn.pragma_update(None, "foreign_keys", "ON")?;
-        migrated
+        airchat_storage::database::migrate(&mut self.conn, &migrations())
     }
 
     pub fn identity(&self) -> Result<Option<(Identity, String)>, StorageError> {
@@ -562,19 +527,10 @@ impl Database {
     }
 }
 
-fn hex(key: &SecretBytes<32>) -> Zeroizing<String> {
-    let mut out = Zeroizing::new(String::with_capacity(64));
-    for byte in key.expose() {
-        out.push(char::from_digit(u32::from(byte >> 4), 16).expect("nibble"));
-        out.push(char::from_digit(u32::from(byte & 0xf), 16).expect("nibble"));
-    }
-    out
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::storage::vault::tests::TEST_PARAMS;
+    use crate::storage::tests::TEST_PARAMS;
 
     /// A database in memory with every migration, and one contact (id 7).
     pub(crate) fn test_db_with_contact() -> (Database, crate::storage::ContactId) {

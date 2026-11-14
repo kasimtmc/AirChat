@@ -113,3 +113,21 @@ name = "account_answer"
 path = "fuzz_targets/account_answer.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "mail_request"
+path = "fuzz_targets/mail_request.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "mail"
+path = "fuzz_targets/mail.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "mailbox_frames"
+path = "fuzz_targets/mailbox_frames.rs"
+test = false
+doc = false
