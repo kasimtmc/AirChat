@@ -2248,8 +2248,8 @@ the same room and keeps nothing: no file, no stream, no log.
   sealed like any other record. The room is at the inviter's server.
 - `size` is how many join the room, the inviter among them: 2 for a file or a call between two.
 - An invite is answered by joining, or not at all: the inviter learns nothing of an invitee that
-  stays away. A device joins only for a purpose its user agreed to (a file it asked for, a call it
-  took) and only from a contact.
+  stays away. A device joins only from a contact, and only for a file offered to it (§15.3) or a
+  call it would ring for (§17).
 
 ### 15.2 Rooms
 
@@ -2386,3 +2386,36 @@ record     = a group message (0x41) or an update part (0x40), each as on a link 
 content is the sender's group delivery key, with its tag key, tag, key and padding;
 `check_group_mail.py` re-derives them from this section and §9.3.
 
+## 17. Calls over a relay
+
+AirChat+ contacts never meet, so a call runs over a relay room (§15) between them: the link of
+§15.3, carrying the call records of §8.5 and §8.6 unchanged. This section adds no format; its
+vectors are §15's.
+
+### 17.1 Calls between two
+
+- **Calling.** The caller picks the call's stream id, mails an invite (`0x62`, purpose `0x02`,
+  `size` 2, `reference` the stream id) to the contact, and opens the room with `wait` 1: the room
+  closes after a minute if the contact's device does not come. Once the link is up it sends the
+  *call offer* (§8.5) over it, and from then on the call goes as in §8.5: *ringing*, *call accept*
+  or *call end*, audio, video (§8.6), 45 s without an answer ending it (*no answer*).
+- **Being called.** A device that gets the invite joins the room at once, before it rings, if it
+  takes calls from the contact (C-5) and is in no other call; else it stays away and the call ends
+  at the caller unanswered. It rings when the offer comes over the link. Joining tells the caller
+  that the device is online now, as *ringing* does in AirChat.
+- **Missed calls.** An invite that does not lead to an offer within a minute, because the room is
+  gone (the invite waited at the server while the device was away) or never got ready, is shown as
+  a missed call from the contact. The device does not call back by itself.
+- **Video.** The relay is a fast transport for §8.6: video is sent over it from the start, without
+  the move to a hotspot. An app may hold its camera back (*paused*) on a metered network.
+- **Losing the link.** When the relay connection drops, the call waits 20 s as in §8.5 and then
+  ends (*lost*); a call is not taken to another room.
+- Whoever controls the server sees two connections in one room for as long as the call lasts,
+  their addresses, timing and volume (which follow speech and the picture, padded to 64 bytes per
+  record, §8.5); never who calls whom, nor what is said.
+
+### 17.2 Group calls
+
+Not yet: how participants who are not each other's contacts share a call over relays (one room
+per pair of participants, or a room of `size` N that passes each frame to everyone) is still to be
+decided.
