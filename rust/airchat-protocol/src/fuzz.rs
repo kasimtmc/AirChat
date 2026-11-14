@@ -22,6 +22,7 @@ use crate::{
     mail::{self, DeviceFrame, Peer, PendingRequest, ServerFrame, SignedStaticKey},
     mesh::{self, Envelope, Pair, UpdatePart},
     pairing::{self, LocalProfile, Pairing, ScannedInvite},
+    relay,
 };
 
 /// Keys of a device the targets play, made once.
@@ -195,6 +196,16 @@ fn pending_request(keys: &Keys) -> PendingRequest {
         },
         secret: keys.secret.clone(),
         transcript: [7; 32],
+    }
+}
+
+/// A relay's frames (§15.2): a join as the relay reads it, its answer as a device reads it.
+pub fn relay_frames(data: &[u8]) {
+    if let Ok(join) = relay::Join::decode(data) {
+        assert_eq!(join.encode(), data);
+    }
+    if let Ok(answer) = relay::JoinAnswer::decode(data) {
+        let _ = answer.encode();
     }
 }
 
@@ -526,6 +537,7 @@ mod tests {
         mailbox_frames: 10_000,
         mail_request_sealed: 1_000,
         mail_accept_sealed: 1_000,
+        relay_frames: 10_000,
     }
 
     /// Writes the seeds where libFuzzer starts from, `fuzz/corpus/<target>/` (see
@@ -553,6 +565,7 @@ mod tests {
             "mailbox_frames",
             "mail_request_sealed",
             "mail_accept_sealed",
+            "relay_frames",
         ];
         for target in decoders {
             let dir = format!("{}/fuzz/corpus/{target}", env!("CARGO_MANIFEST_DIR"));

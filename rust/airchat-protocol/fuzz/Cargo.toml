@@ -143,3 +143,9 @@ name = "mail_accept_sealed"
 path = "fuzz_targets/mail_accept_sealed.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "relay_frames"
+path = "fuzz_targets/relay_frames.rs"
+test = false
+doc = false

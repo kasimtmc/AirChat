@@ -23,6 +23,7 @@ pub mod mail;
 pub mod mesh;
 pub mod pairing;
 pub mod path;
+pub mod relay;
 
 /// Wire protocol version spoken by this build. See `docs/protocol.md`.
 ///

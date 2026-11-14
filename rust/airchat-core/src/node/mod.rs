@@ -3181,8 +3181,8 @@ impl Node {
                 | ChatMessage::GroupAck { .. }
                 | ChatMessage::GroupLeave { .. }),
             ) => actions.extend(self.on_group_record(connection, contact, session, record)?),
-            // AirChat+ mail only (§14.4), never on a link.
-            Some(ChatMessage::DeliveryKey(_)) => {}
+            // AirChat+ mail only (§14.4, §15.1), never on a link.
+            Some(ChatMessage::DeliveryKey(_) | ChatMessage::RelayInvite(_)) => {}
             None => {}
         }
         Ok(actions)

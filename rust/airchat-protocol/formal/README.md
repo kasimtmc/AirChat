@@ -12,6 +12,10 @@ device's long-term keys at any time; a lemma states what it still cannot do.
 | [`mesh.spthy`](mesh.spthy) | 1:1 mesh envelopes (§10.3) and one-time prekeys (§10.7) |
 | [`mail.spthy`](mail.spthy) | AirChat+ contact requests and accepts (§14.2, §14.3), the pairing secret they give, and mail between the contacts |
 
+The AirChat+ relay (§15) is a transport like any other: `link.spthy`'s adversary already controls
+every byte between the two ends, which is all a relay can do, so the link run over a relay needs no
+model of its own. The relay's token only keeps strangers out of a room.
+
 ## Running
 
 Tamarin 1.12 with Maude 3.5 (Arch, CachyOS: `pacman -S tamarin-prover`; other systems: see

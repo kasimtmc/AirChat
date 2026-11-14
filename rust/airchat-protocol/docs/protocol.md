@@ -800,6 +800,7 @@ payload = kind (u8) || body
 0x5e–0x5f:  presence key versions (§5.4)
 0x60:       build attestation (§6.10)
 0x61:       delivery key (§14.4)
+0x62:       relay invite (§15.1)
 ```
 
 - The receiver stores a text message or file offer (§8.4), then acknowledges it, also when it is a
@@ -2122,8 +2123,9 @@ payload  = a §8.1 record of a kind below
   answer `0x5d`). It keeps an older one until every contact took a newer one **and** for at least
   30 days after making the next: mail and requests sealed to it may wait that long at the server
   (§14.5). §6.9's 25 hours are for mesh envelopes, which live a day.
-- **Kinds.** A payload is one of: text `0x01`, ack `0x02`, refused `0x05` (§8.1); prekeys `0x5a`
-  and prekeys wanted `0x5b` (§14.7); static key `0x5c` and static key taken `0x5d` (§6.9); and
+- **Kinds.** A payload is one of: text `0x01`, ack `0x02`, refused `0x05` (§8.1); file offer
+  `0x20` (§8.4; its content goes over a relay, §15.3); prekeys `0x5a` and prekeys wanted `0x5b`
+  (§14.7); static key `0x5c` and static key taken `0x5d` (§6.9); relay invite `0x62` (§15.1); and
 
   ```
   0x61 delivery key:  dk (32)        the sender's new delivery key (§14.4)
@@ -2214,3 +2216,71 @@ hash of each account, waiting mail and requests, nothing else (requirement S-4).
 `tests/vectors/mail.json` holds a request and its accept between two accounts, the `psk` they
 derive, a text mailed to a prekey and its ack mailed to a static key, a delivery-key hash, and the
 deposit and mailbox frames; `check_mail.py` re-derives them from this section.
+
+## 15. Relay
+
+Some things between AirChat+ contacts need both of them at once: the content of a file (§8.4) and
+calls (§8.5, §8.6, §9.6). They meet at a *relay* on a server, never at each other, so neither learns
+the other's address (requirement M-7). A relay passes bytes between the connections that joined
+the same room and keeps nothing: no file, no stream, no log.
+
+### 15.1 Invitations
+
+```
+0x62 relay invite:  room (16) || token (32) || size (u8, 2–33) || purpose (u8) || reference (16)
+                    purpose 0x01 a file      reference: the offer's message_id (§8.4)
+                            0x02 a call      reference: the call's stream id (§8.5)
+```
+
+- The inviter makes `room` and `token` at random and mails the invite (§14.3) to each invitee,
+  sealed like any other record. The room is at the inviter's server.
+- `size` is how many join the room, the inviter among them: 2 for a file or a call between two.
+- An invite is answered by joining, or not at all: the inviter learns nothing of an invitee that
+  stays away. A device joins only for a purpose its user agreed to (a file it asked for, a call it
+  took) and only from a contact.
+
+### 15.2 Rooms
+
+A device joins over a WebSocket on the server's relay endpoint, **not signed in**, each frame one
+binary WebSocket message:
+
+```
+device → server:  0xa0 join:   room (16) || token (32) || size (u8) || wait (u16, minutes, 1–180)
+server → device:  0xa1 ready:  (empty)          everyone joined; from now on frames are passed on
+                  0x7f failure 9 (§13.7)        another token or size for the room, or it is full
+```
+
+- The first join opens the room and says how long it waits for the others: 1 minute for a call, up
+  to 3 hours (180) for a file; then it closes. A later join's `wait` is ignored. A join with the
+  right token takes the next place; one more than `size`, or with another token or size, is
+  refused.
+- After *ready*, every binary message a member sends goes to every other member, unchanged and in
+  order. The room closes when a member leaves; a room of more than two, when fewer than two remain.
+- A room lives at most 6 hours. The server keeps rooms in memory only and rate-limits joins per
+  source address.
+
+### 15.3 Over a relay
+
+The relay is only a transport (§7): what runs over it is protected end to end.
+
+- **Between two contacts** the inviter opens a contact link (§6) as initiator, the invitee
+  responds. Their link key is their pairing secret `psk` (§14.3) and their static keys are those
+  they hold of each other. The link session then carries the file's chunk requests and chunks
+  (§8.4: `0x21`, `0x22`, `0x23`) or the call's records (§8.5, §8.6).
+- **Files.** The sender mails the file offer and, with it, an invite (purpose `0x01`), and waits in
+  the room (`wait` up to 180). The receiver's device joins as soon as it gets the invite and fetches
+  the whole file at once, whatever its auto-download setting (§8.4 does not apply here): nothing
+  waits for it at the server. A sender cut off invites again over a new room, and the transfer
+  resumes (§8.4). **Three hours** after the offer the sender stops: no more invites, no more chunks,
+  and the message shows as *could not be sent*; the receiver drops an offer whose content it did not
+  get by then. The server never holds a byte of a file, only the room while it waits.
+- Whoever controls the server sees two connections that joined one room, their addresses, timing
+  and volume. It cannot read or change what passes (the link session's AEAD), nor pose as either
+  end (the handshake proves `psk` and the static keys), nor tell from the relay alone which
+  accounts the ends belong to.
+
+### 15.4 Test vectors
+
+`tests/vectors/relay.json` holds a relay invite and the join, ready and failure frames;
+`check_relay.py` encodes them again from this section.
+
