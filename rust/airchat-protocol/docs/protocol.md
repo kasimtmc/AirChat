@@ -1091,8 +1091,8 @@ content = 0x01 || text (UTF-8, 1–8192 bytes)
                                                                              only, §16.3)
         | 0x06                                                               leaving (AirChat+ only,
                                                                              §16.3)
-        | 0x07 || relay invite (66, as §15.1's 0x62 after its kind)          a room for a group
-                                                                             file (AirChat+ only,
+        | 0x07 || file drop (as §18.3's 0x63 after its kind)                 where a group file
+                                                                             waits (AirChat+ only,
                                                                              §16.4)
 ```
 
@@ -1987,6 +1987,8 @@ kind 5  set delivery key:    body = SHA-256("AirChat v1 mail-delivery-key" || dk
 kind 6  open mailbox:        body empty; only as the first frame of a mailbox connection  §14.6
 kind 7  add delivery key:    body = SHA-256("AirChat v1 mail-delivery-key" || dk) (32)    §16.2
 kind 8  remove delivery key: body = the same hash (32)                                   §16.2
+kind 9  store file:          body = length (u32) || count (u8, 1–31) || count × token hash (32)
+                             answer 0x79 file stored: file (16) || upload (32)           §18.2
 ```
 
 `nonce` is a fresh challenge (§13.5): every request on a session proves both the token and the
@@ -2072,7 +2074,7 @@ padded_1 = len (u16) || inner_1 || zeros, making the request exactly 4096 bytes
   delivery key (§14.4), so that `B` can mail back.
 - `proof_A` binds `A`'s identity to this request alone: it covers `ct_1`, whose secret only `A`
   and `B` hold, and everything `A` says of itself.
-- `A` keeps `ss_1` and `h_1` until the request is answered, withdrawn or 30 days old.
+- `A` keeps `ss_1` and `h_1` until the request is answered, withdrawn or 7 days old (§14.5).
 
 **Opening.** `B` takes `v_B` as the version of its own static key to decapsulate with, recomputes
 `h_1` with its own name and server, decrypts, and checks: the padding is zeros, `IK_A` is not its
@@ -2134,11 +2136,12 @@ payload  = a §8.1 record of a kind below
   holds; `b` tries its own from the version `a` took last (§6.9). A device makes a new static key
   every week, publishes it at its server (§14.1) and tells its contacts in mail (`0x5c`, until they
   answer `0x5d`). It keeps an older one until every contact took a newer one **and** for at least
-  30 days after making the next: mail and requests sealed to it may wait that long at the server
-  (§14.5). §6.9's 25 hours are for mesh envelopes, which live a day.
+  8 days after making the next: mail and requests sealed to it may wait 7 days at the server
+  (§14.5), and a day more covers clocks and connections. §6.9's 25 hours are for mesh envelopes, which live a day.
 - **Kinds.** A payload is one of: text `0x01`, ack `0x02`, refused `0x05` (§8.1); file offer
-  `0x20` (§8.4; its content goes over a relay, §15.3); prekeys `0x5a` and prekeys wanted `0x5b`
-  (§14.7); static key `0x5c` and static key taken `0x5d` (§6.9); relay invite `0x62` (§15.1);
+  `0x20` (§8.4; its content waits at the server, §18) and file drop `0x63` (§18.3); prekeys `0x5a`
+  and prekeys wanted `0x5b` (§14.7); static key `0x5c` and static key taken `0x5d` (§6.9); relay
+  invite `0x62` (§15.1, for calls);
   update part `0x40` (§16.3, from the admin adding the recipient to a group); and
 
   ```
@@ -2175,7 +2178,7 @@ set on the session (§13.6, kind 5), and refuses mail that shows another key (fa
 
 - A device deposits over a connection **not signed in**, also at its own server, so the deposit is
   not tied to its account (threat model B2 says what the source address still shows).
-- The server keeps mail until the recipient's device takes it, and at most 30 days (M-5). It keeps
+- The server keeps mail until the recipient's device takes it, and at most 7 days (M-5). It keeps
   at most 50 requests per account and rate-limits deposits of requests per source; a request beyond
   the limit is refused like an unknown name.
 - A deposit's answer is the same for an unknown name and a wrong key, and takes about as long.
@@ -2242,16 +2245,16 @@ the same room and keeps nothing: no file, no stream, no log.
 
 ```
 0x62 relay invite:  room (16) || token (32) || size (u8, 2–33) || purpose (u8) || reference (16)
-                    purpose 0x01 a file      reference: the offer's message_id (§8.4)
+                    purpose 0x01 a file      no longer sent: files wait at the server (§18)
                             0x02 a call      reference: the call's stream id (§8.5)
 ```
 
 - The inviter makes `room` and `token` at random and mails the invite (§14.3) to each invitee,
   sealed like any other record. The room is at the inviter's server.
-- `size` is how many join the room, the inviter among them: 2 for a file or a call between two.
+- `size` is how many join the room, the inviter among them: 2 for a call between two.
 - An invite is answered by joining, or not at all: the inviter learns nothing of an invitee that
-  stays away. A device joins only from a contact, and only for a file offered to it (§15.3) or a
-  call it would ring for (§17).
+  stays away. A device joins only from a contact, and only for a call it would ring for (§17); it
+  ignores an invite of purpose `0x01`.
 
 ### 15.2 Rooms
 
@@ -2264,8 +2267,8 @@ server → device:  0xa1 ready:  (empty)          everyone joined; from now on f
                   0x7f failure 9 (§13.7)        another token or size for the room, or it is full
 ```
 
-- The first join opens the room and says how long it waits for the others: 1 minute for a call, up
-  to 3 hours (180) for a file; then it closes. A later join's `wait` is ignored. A join with the
+- The first join opens the room and says how long it waits for the others (1 minute for a call),
+  then it closes. A later join's `wait` is ignored. A join with the
   right token takes the next place; one more than `size`, or with another token or size, is
   refused.
 - After *ready*, every binary message a member sends goes to every other member, unchanged and in
@@ -2279,15 +2282,8 @@ The relay is only a transport (§7): what runs over it is protected end to end.
 
 - **Between two contacts** the inviter opens a contact link (§6) as initiator, the invitee
   responds. Their link key is their pairing secret `psk` (§14.3) and their static keys are those
-  they hold of each other. The link session then carries the file's chunk requests and chunks
-  (§8.4: `0x21`, `0x22`, `0x23`) or the call's records (§8.5, §8.6).
-- **Files.** The sender mails the file offer and, with it, an invite (purpose `0x01`), and waits in
-  the room (`wait` up to 180). The receiver's device joins as soon as it gets the invite and fetches
-  the whole file at once, whatever its auto-download setting (§8.4 does not apply here): nothing
-  waits for it at the server. A sender cut off invites again over a new room, and the transfer
-  resumes (§8.4). **Three hours** after the offer the sender stops: no more invites, no more chunks,
-  and the message shows as *could not be sent*; the receiver drops an offer whose content it did not
-  get by then. The server never holds a byte of a file, only the room while it waits.
+  they hold of each other. The link session then carries the call's records (§8.5, §8.6). Files do
+  not go over a relay: they wait at the server (§18).
 - Whoever controls the server sees two connections that joined one room, their addresses, timing
   and volume. It cannot read or change what passes (the link session's AEAD), nor pose as either
   end (the handshake proves `psk` and the static keys), nor tell from the relay alone which
@@ -2373,13 +2369,13 @@ record     = a group message (0x41) or an update part (0x40), each as on a link 
   (§14.3).
 - **Acknowledgements.** A member that stores a group message answers its sender alone with a group
   message whose content is *received* (`0x05`); the sender shows who has it. Such a message is not
-  shown, and is not answered in turn. A message no member took within 30 days (the most mail
+  shown, and is not answered in turn. A message no member took within 7 days (the most mail
   waits, §14.5) is shown as not delivered.
 - **Leaving.** A member that leaves sends every member a group message whose content is *leaving*
   (`0x06`) and drops the group; members show it, and an admin removes the sender with a new epoch.
 - **Deleting.** An admin's *deleted* (`0x03`, §9.2) goes to every member in group mail. A member
-  remembers a deleted group for 30 days, not a day, since an update of it may wait at its server
-  that long.
+  remembers a deleted group for 8 days, not a day, since an update of it may wait at its server
+  7 days.
 - **Two updates of one epoch** (§9.2) are settled as on links. A device that takes the other update
   seals its own messages of that epoch afresh, queues them again, and tells its delivery key in the
   epoch again; the admin whose update was set aside makes its change again in the next epoch.
@@ -2393,29 +2389,11 @@ record     = a group message (0x41) or an update part (0x40), each as on a link 
 
 ### 16.4 Group files
 
-A file sent to a group goes like a file between two (§15.3), member by member: the file message
-(content `0x02`, §9.3) to everyone in group mail, its content over relay rooms, never stored at a
-server, for **three hours** after the message.
-
-- **Rooms.** A room for a group file is one of two, the sender and one member. Whoever opens it
-  tells the other in a group message to that member alone whose content is a relay invite (`0x07`:
-  purpose file, `size` 2, `reference` the file message's `message_id`), and waits in it. The other
-  joins at once if the file is one it should send or fetch.
-- **Small files, to everyone.** For a file of at most 5 MiB (5 242 880 bytes) the sender opens a room
-  for each member, waiting what is left of the three hours, and each member's device joins as soon
-  as it gets the invite and fetches the file.
-- **Larger files, when asked.** A member's device fetches a larger file only when its user asks: it
-  opens a room, waiting 5 minutes, and invites the sender, which joins if the three hours have not
-  passed and it holds the file whole. A sender that does not come leaves the file to be asked for
-  again.
-- **The link.** In the room the two run a link (§6) as members, with the group link key `link_psk`
-  of §9.4 for the file message's epoch and each other's identity and static keys from that epoch's
-  roster, whether they are contacts or not; whoever opened the room initiates. Over it the fetcher
-  asks for the file's chunks by the message's `message_id` and checks the whole file against
-  `sha256`, and acknowledges it, as in §8.4. A device serves a group file only to a member of the
-  group in the message's epoch, and only the file of that message.
-- After three hours the sender serves the file no more; a member that does not have it shows it as
-  no longer available.
+A file sent to a group waits at the sender's server as any file does (§18), uploaded once for all
+the members. The file message (content `0x02`, §9.3) goes to everyone in group mail; with it each
+member gets, in a group message to it alone, a file drop (content `0x07`: the fields of §18.3's
+`0x63`) carrying its own token. The upload holds one token per member besides the sender (at most
+31), so the server deletes the file once every member took it, or after 7 days.
 
 ### 16.5 Test vectors
 
@@ -2456,3 +2434,85 @@ vectors are §15's.
 Not yet: how participants who are not each other's contacts share a call over relays (one room
 per pair of participants, or a room of `size` N that passes each frame to everyone) is still to be
 decided.
+
+## 18. Files at the server
+
+A file's content waits at the sender's server, sealed end to end, until every recipient took it
+and at most **7 days** (M-5): the sender uploads it once, whatever the number of recipients, and
+each recipient downloads it with a token of its own. Messages offer the file as before (`0x20`
+between two, content `0x02` in a group); the content no longer goes from device to device.
+
+### 18.1 Sealing
+
+```
+key      = 32 random bytes, a new one for every file
+chunk i  = bytes i·65536 to (i+1)·65536 of the file; the last one padded with zeros to 65536
+count    = ⌈size / 65536⌉, at least 1, at most 1024 (so a file has at most 64 MiB)
+sealed i = ChaCha20-Poly1305(key, nonce = i (u64) || last (u32: 1 for the last chunk, else 0),
+                             aad = message_id (16), chunk i)
+content  = sealed 0 || sealed 1 || … , count × 65552 bytes
+```
+
+`message_id` is that of the message offering the file. A recipient opens every chunk, refuses
+padding that is not zeros, keeps the `size` bytes the offer names, and checks them against the
+offer's `sha256`. The server learns the size in whole chunks, never the name, type or content.
+
+### 18.2 Storing
+
+The sender asks its server on its session for room (§13.6, kind 9): the content's `length`, and
+for each recipient the hash of a download token of 32 random bytes,
+
+```
+token hash = SHA-256("AirChat v1 file-token" || token)
+```
+
+The server answers *file stored* (`0x79`) with a file id and an upload token, both random, or
+refuses (failure 9) a length that is not whole sealed chunks or above 1024 of them, and a file that
+would make the account's files not yet taken exceed 1 GiB. The sender then uploads the content on
+the server's files endpoint (HTTP POST of one frame), **not signed in**:
+
+```
+0xb0 upload:  file (16) || upload (32) || content        answer 0x78 done, or failure 9
+```
+
+The server keeps a file until every token has said *taken* (§18.4) or 7 days after kind 9,
+whichever comes first, and deletes an upload that does not match the length stored. It keeps the
+file's owner (for the 1 GiB), its length, the day it was stored and the token hashes, nothing else.
+
+### 18.3 Telling the recipients
+
+Once the upload is done, the sender tells each recipient where its file waits:
+
+```
+0x63 file drop:  reference (16) || Name(server) || file (16) || token (32) || key (32)
+```
+
+`reference` is the offering message's id; `server` is the sender's server; `token` is the
+recipient's own. Between two it goes in mail after the offer (§14.3); in a group, as content
+`0x07` in a group message to that member alone (§16.4). A recipient that takes the offer before
+the drop waits for the drop.
+
+### 18.4 Taking
+
+```
+0xb1 download:  file (16) || token (32)        answer 0xb3 content: the sealed content, or failure 9
+0xb2 taken:     file (16) || token (32)        answer 0x78 done, or failure 9
+```
+
+Both go on the files endpoint, not signed in. A recipient downloads a file as soon as it gets the
+drop (whatever its auto-download setting), opens and checks it, and then says *taken*, which spends
+its token; it says *taken* also when the content does not open, since nothing better will come. A
+recipient between two then acknowledges the offer (`0x02` ack with the offer's id), and the sender
+shows the file as delivered; in a group the members' *received* (§16.3) say who has the message.
+A download refused (the file is gone) leaves the file shown as no longer available.
+
+- The server sees one upload and one download per recipient, their sizes and source addresses; it
+  cannot open the content, nor tell who downloads (tokens are not tied to accounts).
+- Mail and files share the 7 days: what is not taken by then is gone, and its sender shows it as
+  not delivered.
+
+### 18.5 Test vectors
+
+`tests/vectors/file_drop.json` holds a 70 000-byte file sealed in two chunks (its length, hash and
+last tag), a token's hash, a file drop record and a download frame; `check_file_drop.py`
+re-derives them from this section.

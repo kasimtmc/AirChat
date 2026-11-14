@@ -43,6 +43,7 @@
 //! 0x5f presence key taken: version (u32)
 //! 0x61 delivery key:  key (32)                                                          (§14.4)
 //! 0x62 relay invite:  room (16) || token (32) || size (u8) || purpose (u8) || reference (16)  (§15.1)
+//! 0x63 file drop:     reference (16) || Name(server) || file (16) || token (32) || key (32)    (§18.3)
 //! ```
 //! Other kinds are ignored, so later versions can add some without breaking this one.
 
@@ -137,6 +138,7 @@ const KIND_PRESENCE_KEY_TAKEN: u8 = 0x5f;
 const KIND_BUILD_ATTESTATION: u8 = 0x60;
 const KIND_DELIVERY_KEY: u8 = 0x61;
 const KIND_RELAY_INVITE: u8 = 0x62;
+const KIND_FILE_DROP: u8 = 0x63;
 /// Prekeys in one record at most, and asked for at most (§10.7).
 pub const MAX_PREKEYS_PER_RECORD: usize = 12;
 pub const MAX_PREKEYS_WANTED: u8 = 24;
@@ -572,6 +574,8 @@ pub enum ChatMessage {
     DeliveryKey(Zeroizing<[u8; 32]>),
     /// An invitation to a relay room (§15.1).
     RelayInvite(crate::relay::Invite),
+    /// Where the content of a file offered waits at a server, and its key (§18.3).
+    FileDrop(crate::drop::Drop),
     /// The sender's Android key attestation (§6.10): the attested certificate first, at most
     /// [`crate::attest::MAX_CERTS`]; and the attested key's signature over this link's handshake hash.
     BuildAttestation {
@@ -835,6 +839,7 @@ impl ChatMessage {
             Self::PresenceKeyTaken(version) => [&[KIND_PRESENCE_KEY_TAKEN][..], &version.to_be_bytes()].concat(),
             Self::DeliveryKey(key) => [&[KIND_DELIVERY_KEY][..], &key[..]].concat(),
             Self::RelayInvite(invite) => [&[KIND_RELAY_INVITE][..], &invite.encode()].concat(),
+            Self::FileDrop(drop) => [&[KIND_FILE_DROP][..], &drop.encode()].concat(),
             Self::BuildAttestation { certs, proof } => {
                 let mut out = vec![KIND_BUILD_ATTESTATION, u8::try_from(certs.len()).unwrap_or(u8::MAX)];
                 for cert in certs {
@@ -1277,6 +1282,9 @@ impl ChatMessage {
             }
             KIND_RELAY_INVITE => Ok(Some(Self::RelayInvite(
                 crate::relay::Invite::decode(body).map_err(|_| ChatError::Malformed)?,
+            ))),
+            KIND_FILE_DROP => Ok(Some(Self::FileDrop(
+                crate::drop::Drop::decode(body).map_err(|_| ChatError::Malformed)?,
             ))),
             KIND_DELIVERY_KEY => {
                 let key: [u8; 32] = body.try_into().map_err(|_| ChatError::Malformed)?;

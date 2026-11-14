@@ -228,6 +228,18 @@ pub fn relay_frames(data: &[u8]) {
     }
 }
 
+/// The files endpoint (§18): requests as the server reads them, answers as a device reads them, and
+/// a sealed file as its recipient opens it.
+pub fn file_frames(data: &[u8]) {
+    if let Ok(request) = crate::drop::FileRequest::decode(data) {
+        assert_eq!(request.encode(), data);
+    }
+    if let Ok(answer) = crate::drop::FileAnswer::decode(data) {
+        let _ = answer.encode();
+    }
+    let _ = crate::drop::open(&keys().secret, &[6; 16], data.len() as u64, data);
+}
+
 /// The frames of a mailbox connection (§14.6), each side's as the other reads them.
 pub fn mailbox_frames(data: &[u8]) {
     for frame in frames(data) {
@@ -558,6 +570,7 @@ mod tests {
         mail_accept_sealed: 1_000,
         relay_frames: 10_000,
         group_mail_sealed: 1_000,
+        file_frames: 10_000,
     }
 
     /// Writes the seeds where libFuzzer starts from, `fuzz/corpus/<target>/` (see
@@ -587,6 +600,7 @@ mod tests {
             "mail_accept_sealed",
             "relay_frames",
             "group_mail_sealed",
+            "file_frames",
         ];
         for target in decoders {
             let dir = format!("{}/fuzz/corpus/{target}", env!("CARGO_MANIFEST_DIR"));

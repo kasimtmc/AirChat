@@ -155,3 +155,9 @@ name = "group_mail_sealed"
 path = "fuzz_targets/group_mail_sealed.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "file_frames"
+path = "fuzz_targets/file_frames.rs"
+test = false
+doc = false

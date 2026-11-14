@@ -16,6 +16,10 @@ The AirChat+ relay (§15) is a transport like any other: `link.spthy`'s adversar
 every byte between the two ends, which is all a relay can do, so the link run over a relay needs no
 model of its own. The relay's token only keeps strangers out of a room.
 
+Files at the server (§18) need no model of their own either: a file's key and download token travel
+in mail (`mail.spthy`'s secrecy and authenticity), and what the server holds is AEAD under that key,
+bound to the offering message's id.
+
 ## Running
 
 Tamarin 1.12 with Maude 3.5 (Arch, CachyOS: `pacman -S tamarin-prover`; other systems: see

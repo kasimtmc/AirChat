@@ -159,6 +159,8 @@ pub const MAIL_DELIVERY_KEY: &[u8] = b"AirChat v1 mail-delivery-key";
 pub const MAIL_GROUP_TAG_KEY: &[u8] = b"AirChat v1 mail-group-tag-key";
 /// Key of a piece of group mail (§16.3).
 pub const MAIL_GROUP_SEAL: &[u8] = b"AirChat v1 mail-group-seal";
+/// Hash input of a file's download token, as a server keeps it (§18.2).
+pub const FILE_TOKEN: &[u8] = b"AirChat v1 file-token";
 
 #[cfg(test)]
 mod tests {
@@ -217,6 +219,7 @@ mod tests {
         MAIL_DELIVERY_KEY,
         MAIL_GROUP_TAG_KEY,
         MAIL_GROUP_SEAL,
+        FILE_TOKEN,
     ];
 
     #[test]

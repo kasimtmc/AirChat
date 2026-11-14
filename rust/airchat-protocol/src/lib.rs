@@ -13,6 +13,7 @@ pub mod channel;
 pub mod chat;
 pub mod crypto;
 pub mod discovery;
+pub mod drop;
 #[cfg(any(test, feature = "fuzzing"))]
 pub mod fuzz;
 pub mod group;

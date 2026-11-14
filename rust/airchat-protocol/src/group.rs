@@ -340,8 +340,8 @@ pub enum Content {
     Received([u8; 16]),
     /// The sender leaves the group (§16.3).
     Leaving,
-    /// The sender waits in a relay room for the one this message goes to, for a group file (§16.4).
-    RelayInvite(crate::relay::Invite),
+    /// Where the content of a group file waits for the one this message goes to (§16.4, §18.3).
+    FileDrop(crate::drop::Drop),
 }
 
 const CONTENT_TEXT: u8 = 0x01;
@@ -350,7 +350,7 @@ const CONTENT_DELETED: u8 = 0x03;
 const CONTENT_DELIVERY_KEY: u8 = 0x04;
 const CONTENT_RECEIVED: u8 = 0x05;
 const CONTENT_LEAVING: u8 = 0x06;
-const CONTENT_RELAY_INVITE: u8 = 0x07;
+const CONTENT_FILE_DROP: u8 = 0x07;
 
 impl Content {
     pub(crate) fn encode(&self) -> Result<Zeroizing<Vec<u8>>, GroupError> {
@@ -370,7 +370,7 @@ impl Content {
             Self::DeliveryKey(key) => [&[CONTENT_DELIVERY_KEY][..], &key[..]].concat(),
             Self::Received(message_id) => [&[CONTENT_RECEIVED][..], message_id].concat(),
             Self::Leaving => vec![CONTENT_LEAVING],
-            Self::RelayInvite(invite) => [&[CONTENT_RELAY_INVITE][..], &invite.encode()].concat(),
+            Self::FileDrop(drop) => [&[CONTENT_FILE_DROP][..], &drop.encode()].concat(),
         }))
     }
 
@@ -392,8 +392,8 @@ impl Content {
                 message_id.try_into().map_err(|_| GroupError::Malformed)?,
             )),
             Some((&CONTENT_LEAVING, [])) => Ok(Self::Leaving),
-            Some((&CONTENT_RELAY_INVITE, invite)) => Ok(Self::RelayInvite(
-                crate::relay::Invite::decode(invite).map_err(|_| GroupError::Malformed)?,
+            Some((&CONTENT_FILE_DROP, drop)) => Ok(Self::FileDrop(
+                crate::drop::Drop::decode(drop).map_err(|_| GroupError::Malformed)?,
             )),
             _ => Err(GroupError::Malformed),
         }
@@ -761,9 +761,14 @@ pub(crate) mod tests {
         assert!(Content::decode(&[&[0x05][..], &[0; 15]].concat()).is_err());
         assert!(Content::decode(&[0x06, 0]).is_err());
 
-        // A relay invite for a group file (§16.4).
-        let invite =
-            Content::RelayInvite(crate::relay::Invite::new(2, crate::relay::Purpose::File, [0x11; 16]).unwrap());
+        // Where a group file waits (§16.4).
+        let invite = Content::FileDrop(crate::drop::Drop {
+            reference: [0x11; 16],
+            server: "chat.example.org".into(),
+            file: [0x12; 16],
+            token: Zeroizing::new([0x13; 32]),
+            key: Zeroizing::new([0x14; 32]),
+        });
         let sealed = seal_message(&[3; 16], 4, &key, &[11; 16], &ayse.identity, 6_000, &invite).unwrap();
         assert_eq!(Message::read(&sealed).unwrap().open(&key).unwrap(), (6_000, invite));
         assert!(Content::decode(&[0x07; 30]).is_err());

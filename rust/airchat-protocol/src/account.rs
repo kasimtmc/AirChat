@@ -35,6 +35,7 @@ const LOOKUP: u8 = 0x80;
 const KEYS: u8 = 0x81;
 const DEPOSIT: u8 = 0x82;
 const DEPOSIT_REQUEST: u8 = 0x83;
+const FILE_STORED: u8 = 0x79;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum AccountError {
@@ -308,6 +309,11 @@ pub enum Action {
     RemoveDeliveryKey {
         hash: [u8; 32],
     },
+    /// Room for a file's sealed content, and the hashes of its recipients' tokens (§18.2).
+    StoreFile {
+        length: u32,
+        tokens: Vec<[u8; 32]>,
+    },
 }
 
 /// `0x77 authorized` (§13.6). The server knows the identity key the token is bound to and checks
@@ -379,6 +385,14 @@ impl Authorized {
             Action::RemoveDeliveryKey { hash } => {
                 out.push(8);
                 out.extend_from_slice(hash);
+            }
+            Action::StoreFile { length, tokens } => {
+                out.push(9);
+                out.extend_from_slice(&length.to_be_bytes());
+                out.push(tokens.len() as u8);
+                for token in tokens {
+                    out.extend_from_slice(token);
+                }
             }
         }
         out
@@ -504,6 +518,15 @@ impl Request {
                     6 => Action::OpenMailbox,
                     7 => Action::AddDeliveryKey { hash: reader.array()? },
                     8 => Action::RemoveDeliveryKey { hash: reader.array()? },
+                    9 => {
+                        let length = reader.u32()?;
+                        let count = usize::from(reader.u8()?);
+                        if !(1..=crate::drop::MAX_RECIPIENTS).contains(&count) {
+                            return Err(AccountError::Malformed);
+                        }
+                        let tokens = (0..count).map(|_| reader.array()).collect::<Result<_, _>>()?;
+                        Action::StoreFile { length, tokens }
+                    }
                     _ => return Err(AccountError::Malformed),
                 },
                 signature: reader.array()?,
@@ -596,6 +619,11 @@ pub enum Answer {
         identity: PublicIdentity,
         static_key: SignedStaticKey,
     },
+    /// Room made for a file (§18.2): its id, and the token to upload it with.
+    FileStored {
+        file: [u8; 16],
+        upload: SecretBytes<32>,
+    },
 }
 
 impl Answer {
@@ -627,6 +655,11 @@ impl Answer {
                 out.extend_from_slice(identity.as_bytes());
                 static_key.encode(&mut out);
             }
+            Self::FileStored { file, upload } => {
+                out.push(FILE_STORED);
+                out.extend_from_slice(file);
+                out.extend_from_slice(upload.expose());
+            }
         }
         out
     }
@@ -656,6 +689,10 @@ impl Answer {
                 identity: PublicIdentity::from_bytes(reader.array()?),
                 static_key: SignedStaticKey::decode(reader.take(mail::SIGNED_STATIC_KEY_LEN)?)
                     .ok_or(AccountError::Malformed)?,
+            },
+            FILE_STORED => Self::FileStored {
+                file: reader.array()?,
+                upload: reader.secret()?,
             },
             _ => return Err(AccountError::Malformed),
         };
@@ -885,6 +922,10 @@ mod tests {
             Action::OpenMailbox,
             Action::AddDeliveryKey { hash: [11; 32] },
             Action::RemoveDeliveryKey { hash: [12; 32] },
+            Action::StoreFile {
+                length: 65_552,
+                tokens: vec![[13; 32], [14; 32]],
+            },
         ] {
             let authorized = Authorized::new(&me, "a.org", rekey(8).auth_key, [9; 32], action).unwrap();
             let Request::Authorized(decoded) = round_trip(&Request::Authorized(authorized)) else {
@@ -913,6 +954,10 @@ mod tests {
             Answer::Failure {
                 failure: Failure::TooManyAttempts,
                 retry_after: 60,
+            },
+            Answer::FileStored {
+                file: [4; 16],
+                upload: rekey(5).auth_key,
             },
         ] {
             let bytes = answer.encode();
