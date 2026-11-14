@@ -1087,9 +1087,14 @@ content = 0x01 || text (UTF-8, 1–8192 bytes)
                                                                              (an admin only, §9.2)
         | 0x04 || dk (32)                                                    a group delivery key
                                                                              (AirChat+ only, §16.2)
+        | 0x05 || message id (16)                                            received (AirChat+
+                                                                             only, §16.3)
+        | 0x06                                                               leaving (AirChat+ only,
+                                                                             §16.3)
 ```
 
-A device without AirChat+ acknowledges a message whose content is `0x04` and ignores it.
+A device without AirChat+ acknowledges a message whose content is `0x04`, `0x05` or `0x06` and
+ignores it.
 
 A device stores a group message once (by `group_id` and `message_id`) when the sender is a member of
 that epoch, the signature verifies and it decrypts. Messages of an epoch the device does not hold
@@ -2317,11 +2322,14 @@ alone:
   and up to 64 more, added and removed on its session (§13.6, kinds 7 and 8). A deposit (§14.5)
   may show any of them.
 - A member adds `dk_G` at its server when it joins (it accepts the update that adds it), and tells
-  the group in a group message whose content is
+  the group, then again in each epoch it accepts (so members added since learn it), in a group
+  message whose content is
   ```
   0x04 delivery key:  dk (32)        the sender's group delivery key (§16.2)
   ```
-  Members take it from the message and admins put it in later rosters.
+  Members take it from the message and admins put it in later rosters. Members added together
+  know only the keys the roster had: an admin therefore passes each such message it takes on,
+  unchanged, to every other member whose key it knows (its sender's signature still holds).
 - When an epoch removes someone, every remaining member makes a new `dk_G`, adds it, tells the
   group, and removes the old one an hour later (mail still on its way may show it).
 - The server sees how many keys an account holds, and which of them a deposit shows: it can tell
@@ -2338,8 +2346,7 @@ tag_key    = HKDF(salt = "", ikm = epoch_key, info = "AirChat v1 mail-group-tag-
 tag        = nonce (16 random bytes) || HMAC-SHA-256(tag_key, "AirChat v1 mail-tag-mac" || nonce)[0..16]
 key        = HKDF(salt = "", ikm = epoch_key, info = "AirChat v1 mail-group-seal" || group_id || epoch (u64) || tag)
 padded     = len (u16) || record || zeros, making the mail exactly 2048, 4096 or 16384 bytes
-record     = a group message (0x41), a group ack (0x42), a group leave (0x43) or an update part (0x40),
-             each as on a link (§9.3, §9.5)
+record     = a group message (0x41) or an update part (0x40), each as on a link (§9.3, §9.5)
 ```
 
 - `epoch_key` is the key of the epoch the record belongs to; for an update part, of the epoch
@@ -2350,16 +2357,28 @@ record     = a group message (0x41), a group ack (0x42), a group leave (0x43) or
   group, who sent it, nor what it carries.
 - The record inside is what §9 makes it, sealed and signed by its sender as on a link; the outer
   seal hides from the server who sent it and to which group, which the record shows in clear.
+- Group acks (`0x42`) and group leaves (`0x43`) do not go in group mail: they name no sender, and
+  in mail, unlike on a link, nothing would vouch for one. Group messages carry them instead, signed
+  by their sender like any other:
+  ```
+  0x05 received:  message id (16)    the sender stored that group message
+  0x06 leaving                       the sender leaves the group
+  ```
 - **Updates.** An update goes in parts (§9.5) of at most 15000 bytes of data each, so a part fits
-  in the largest mail of either kind. Members of the previous epoch get it as group mail under that epoch's key;
-  a member being added, which holds no key yet, gets it in mail from the admin, who is its contact
-  (§9.2): parts `0x40` are a kind contact mail may carry (§14.3).
+  in the largest mail of either kind. Members of the previous epoch, the removed ones included, get
+  it as group mail under that epoch's key; a member being added, which holds no key yet, gets it in
+  mail from the admin, who is its contact (§9.2): parts `0x40` are a kind contact mail may carry
+  (§14.3).
 - **Acknowledgements.** A member that stores a group message answers its sender alone with a group
-  ack (`0x42`) in group mail; the sender shows who has it. A message no member took within 30 days
-  (the most mail waits, §14.5) is shown as not delivered.
+  message whose content is *received* (`0x05`); the sender shows who has it. Such a message is not
+  shown, and is not answered in turn. A message no member took within 30 days (the most mail
+  waits, §14.5) is shown as not delivered.
+- **Leaving.** A member that leaves sends every member a group message whose content is *leaving*
+  (`0x06`) and drops the group; members show it, and an admin removes the sender with a new epoch.
 - A member whose `dk_G` the sender does not know yet gets nothing until it does: its first group
   message tells everyone.
-- Flooding (§9.5) does not apply: every sender deposits for every member itself.
+- Flooding (§9.5) does not apply: every sender deposits for every member itself, but for the
+  delivery keys an admin passes on (§16.2).
 
 ### 16.4 Test vectors
 

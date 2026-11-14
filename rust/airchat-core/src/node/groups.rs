@@ -1195,8 +1195,8 @@ impl Node {
                 );
             }
             Content::Deleted => return (Vec::new(), Some(ack)),
-            // AirChat+ group mail only (§16.2): acknowledged and ignored (§9.3).
-            Content::DeliveryKey(_) => return (Vec::new(), Some(ack)),
+            // AirChat+ group mail only (§16.2, §16.3): acknowledged and ignored (§9.3).
+            Content::DeliveryKey(_) | Content::Received(_) | Content::Leaving => return (Vec::new(), Some(ack)),
         };
         let me = account.identity().public();
         let stored = db

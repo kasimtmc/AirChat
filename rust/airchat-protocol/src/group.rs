@@ -336,12 +336,18 @@ pub enum Content {
     Deleted,
     /// The sender's delivery key for this group, with which members leave it group mail (§16.2).
     DeliveryKey(Zeroizing<[u8; 32]>),
+    /// The sender stored the group message with this id (§16.3).
+    Received([u8; 16]),
+    /// The sender leaves the group (§16.3).
+    Leaving,
 }
 
 const CONTENT_TEXT: u8 = 0x01;
 const CONTENT_FILE: u8 = 0x02;
 const CONTENT_DELETED: u8 = 0x03;
 const CONTENT_DELIVERY_KEY: u8 = 0x04;
+const CONTENT_RECEIVED: u8 = 0x05;
+const CONTENT_LEAVING: u8 = 0x06;
 
 impl Content {
     pub(crate) fn encode(&self) -> Result<Zeroizing<Vec<u8>>, GroupError> {
@@ -359,6 +365,8 @@ impl Content {
             .concat(),
             Self::Deleted => vec![CONTENT_DELETED],
             Self::DeliveryKey(key) => [&[CONTENT_DELIVERY_KEY][..], &key[..]].concat(),
+            Self::Received(message_id) => [&[CONTENT_RECEIVED][..], message_id].concat(),
+            Self::Leaving => vec![CONTENT_LEAVING],
         }))
     }
 
@@ -376,6 +384,10 @@ impl Content {
             Some((&CONTENT_DELIVERY_KEY, key)) => Ok(Self::DeliveryKey(Zeroizing::new(
                 key.try_into().map_err(|_| GroupError::Malformed)?,
             ))),
+            Some((&CONTENT_RECEIVED, message_id)) => Ok(Self::Received(
+                message_id.try_into().map_err(|_| GroupError::Malformed)?,
+            )),
+            Some((&CONTENT_LEAVING, [])) => Ok(Self::Leaving),
             _ => Err(GroupError::Malformed),
         }
     }
@@ -733,6 +745,14 @@ pub(crate) mod tests {
         assert_eq!(Message::read(&sealed).unwrap().open(&key).unwrap(), (4_000, dk));
         assert!(Content::decode(&[&[0x04][..], &[0; 31]].concat()).is_err());
         assert!(Content::decode(&[&[0x04][..], &[0; 33]].concat()).is_err());
+
+        // Received and leaving (§16.3).
+        for content in [Content::Received([0x77; 16]), Content::Leaving] {
+            let sealed = seal_message(&[3; 16], 4, &key, &[10; 16], &ayse.identity, 5_000, &content).unwrap();
+            assert_eq!(Message::read(&sealed).unwrap().open(&key).unwrap(), (5_000, content));
+        }
+        assert!(Content::decode(&[&[0x05][..], &[0; 15]].concat()).is_err());
+        assert!(Content::decode(&[0x06, 0]).is_err());
     }
 
     #[test]
