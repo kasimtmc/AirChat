@@ -77,6 +77,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # A workspace without a committed lockfile is resolved here, with the pinned toolchain:
+      # cargo-deny's container has an older Rust, whose resolution would pick older versions
+      # (seen with ctutils 0.4.3, RUSTSEC-2026-0385, which 0.4.8 fixes but needs Rust 1.87).
+      - name: Resolve dependencies
+        working-directory: ${{ matrix.workspace }}
+        run: test -f Cargo.lock || cargo generate-lockfile
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           manifest-path: ${{ matrix.workspace }}/Cargo.toml
