@@ -1094,9 +1094,11 @@ content = 0x01 || text (UTF-8, 1–8192 bytes)
         | 0x07 || file drop (as §18.3's 0x63 after its kind)                 where a group file
                                                                              waits (AirChat+ only,
                                                                              §16.4)
+        | 0x08 || relay invite (66, as §15.1's 0x62 after its kind)          a group call (AirChat+
+               || media (u8: 0x01 video, 0x00 voice)                         only, §17.2)
 ```
 
-A device without AirChat+ acknowledges a message whose content is `0x04` to `0x07` and ignores it.
+A device without AirChat+ acknowledges a message whose content is `0x04` to `0x08` and ignores it.
 
 A device stores a group message once (by `group_id` and `message_id`) when the sender is a member of
 that epoch, the signature verifies and it decrypts. Messages of an epoch the device does not hold
@@ -2267,12 +2269,15 @@ server → device:  0xa1 ready:  (empty)          everyone joined; from now on f
                   0x7f failure 9 (§13.7)        another token or size for the room, or it is full
 ```
 
-- The first join opens the room and says how long it waits for the others (1 minute for a call),
-  then it closes. A later join's `wait` is ignored. A join with the
+- The first join opens the room. A room of two waits for the other as long as the first join says
+  (1 minute for a call), then it closes; a later join's `wait` is ignored. A room of more than two
+  (a group call, §17.2) is ready at once: each member gets *ready* as it joins. A join with the
   right token takes the next place; one more than `size`, or with another token or size, is
   refused.
-- After *ready*, every binary message a member sends goes to every other member, unchanged and in
-  order. The room closes when a member leaves; a room of more than two, when fewer than two remain.
+- After *ready*, every binary message a member sends goes to every other member in the room at the
+  time, unchanged and in order; what a member sent before it left still goes. A room of two closes
+  when a member leaves; a room of more than two, when it empties or when fewer than two remain
+  after a member left.
 - A room lives at most 6 hours. The server keeps rooms in memory only and rate-limits joins per
   source address.
 
@@ -2431,9 +2436,44 @@ vectors are §15's.
 
 ### 17.2 Group calls
 
-Not yet: how participants who are not each other's contacts share a call over relays (one room
-per pair of participants, or a room of `size` N that passes each frame to everyone) is still to be
-decided.
+A group call is AirChat's (§9.6, §9.9) over one relay room for the whole call: every participant
+joins it, and the room passes each frame to everyone in it, so nobody repeats what it hears and the
+participants need not be each other's contacts.
+
+- **Calling.** A member picks the call's stream id, a room and its token, with `size` the number of
+  members in the newest roster it holds, and sends every other member a group message whose content
+  is a group call (`0x08`: a relay invite of purpose `0x02` whose `reference` is the stream id, and
+  whether it is a video call). It joins the room at once.
+- **Being called.** A member that gets the invite from a member of that epoch rings at once if it
+  is in no other call; answering joins the room. Declining does nothing the caller sees. It stops
+  ringing after 45 s, or when the room turns out to be gone (the invite waited at the server while
+  the device was away: a missed call).
+- **In the room** the records of §9.6 and §9.9 (`0x38` group call, `0x39` group call leave, `0x3e`
+  call presence, `0x3f` call audio, `0x46` video, `0x47` key frame request) go sealed as frames:
+
+  ```
+  key   = HKDF(salt = "", ikm = epoch_key,
+               info = "AirChat v1 group-call-key" || group_id || epoch (u64) || stream id (16))
+  frame = origin (8) || counter (u32) || ChaCha20-Poly1305(key, nonce = origin || counter, aad = "",
+                                                         len (u16) || record || zeros to a multiple of 64)
+  ```
+
+  `epoch` is that of the group message with the invite. `origin` is 8 random bytes a participant
+  picks each time it joins the room (apart from the call origin of its presence and audio, §9.6),
+  and `counter` counts its frames under that origin from 0. A counter never restarts under an
+  origin, since the same nonce under the same key would undo the AEAD: a participant that joins
+  again, lost its count, or would see its counter wrap picks a new origin. A participant drops a
+  frame that does not open, one of its own origins come back, and a presence whose member is not in
+  that epoch's roster. Joining, a participant sends *group call* and its presence; those in the room
+  answer with theirs (§9.6). Nothing is passed on: everyone in the room gets every frame.
+- **Leaving** sends *group call leave*, then leaves the room. The call is over for a device once
+  everyone else left; a call nobody joins within 45 s is given up (*no answer*).
+- Members added after the call started hold no key of its epoch and are not in it; they can be
+  called again. As in §9.6, participants trust each other with their voice: a frame is sealed for
+  the group, not signed by its sender.
+- Whoever controls the server sees one room, a connection per participant and the frames' sizes
+  and timing; never who they are, which group, nor what is said. `tests/vectors/group_call.json`
+  holds a call key and a frame; `check_group_call.py` re-derives them from this section.
 
 ## 18. Files at the server
 

@@ -1195,8 +1195,12 @@ impl Node {
                 );
             }
             Content::Deleted => return (Vec::new(), Some(ack)),
-            // AirChat+ group mail only (§16.2–§16.4): acknowledged and ignored (§9.3).
-            Content::DeliveryKey(_) | Content::Received(_) | Content::Leaving | Content::FileDrop(_) => {
+            // AirChat+ group mail only (§16.2–§16.4, §17.2): acknowledged and ignored (§9.3).
+            Content::DeliveryKey(_)
+            | Content::Received(_)
+            | Content::Leaving
+            | Content::FileDrop(_)
+            | Content::GroupCall { .. } => {
                 return (Vec::new(), Some(ack));
             }
         };

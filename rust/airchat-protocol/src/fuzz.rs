@@ -240,6 +240,18 @@ pub fn file_frames(data: &[u8]) {
     let _ = crate::drop::open(&keys().secret, &[6; 16], data.len() as u64, data);
 }
 
+/// A frame of a group call's room (§17.2), as a participant opens it, sealed with a chosen record
+/// so what is behind the AEAD is fuzzed too.
+pub fn group_call_frames(data: &[u8]) {
+    let keys = keys();
+    let _ = crate::group::open_call_frame(&keys.secret, data);
+    if let Ok(frame) = crate::group::seal_call_frame(&keys.secret, &[1; 8], 0, data) {
+        let (_, _, record) = crate::group::open_call_frame(&keys.secret, &frame).expect("sealed just now");
+        assert_eq!(&record[..], data);
+        let _ = ChatMessage::decode(&record);
+    }
+}
+
 /// The frames of a mailbox connection (§14.6), each side's as the other reads them.
 pub fn mailbox_frames(data: &[u8]) {
     for frame in frames(data) {
@@ -571,6 +583,7 @@ mod tests {
         relay_frames: 10_000,
         group_mail_sealed: 1_000,
         file_frames: 10_000,
+        group_call_frames: 5_000,
     }
 
     /// Writes the seeds where libFuzzer starts from, `fuzz/corpus/<target>/` (see
@@ -601,6 +614,7 @@ mod tests {
             "relay_frames",
             "group_mail_sealed",
             "file_frames",
+            "group_call_frames",
         ];
         for target in decoders {
             let dir = format!("{}/fuzz/corpus/{target}", env!("CARGO_MANIFEST_DIR"));

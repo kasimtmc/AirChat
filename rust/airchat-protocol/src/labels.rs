@@ -161,6 +161,8 @@ pub const MAIL_GROUP_TAG_KEY: &[u8] = b"AirChat v1 mail-group-tag-key";
 pub const MAIL_GROUP_SEAL: &[u8] = b"AirChat v1 mail-group-seal";
 /// Hash input of a file's download token, as a server keeps it (§18.2).
 pub const FILE_TOKEN: &[u8] = b"AirChat v1 file-token";
+/// Key of a group call's room, in one epoch (§17.2).
+pub const GROUP_CALL_KEY: &[u8] = b"AirChat v1 group-call-key";
 
 #[cfg(test)]
 mod tests {
@@ -220,6 +222,7 @@ mod tests {
         MAIL_GROUP_TAG_KEY,
         MAIL_GROUP_SEAL,
         FILE_TOKEN,
+        GROUP_CALL_KEY,
     ];
 
     #[test]

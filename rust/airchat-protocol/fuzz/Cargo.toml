@@ -161,3 +161,9 @@ name = "file_frames"
 path = "fuzz_targets/file_frames.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "group_call_frames"
+path = "fuzz_targets/group_call_frames.rs"
+test = false
+doc = false

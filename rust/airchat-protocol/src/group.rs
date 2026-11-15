@@ -342,6 +342,11 @@ pub enum Content {
     Leaving,
     /// Where the content of a group file waits for the one this message goes to (§16.4, §18.3).
     FileDrop(crate::drop::Drop),
+    /// A group call: its room, where the sender waits, and whether it is a video call (§17.2).
+    GroupCall {
+        invite: crate::relay::Invite,
+        video: bool,
+    },
 }
 
 const CONTENT_TEXT: u8 = 0x01;
@@ -351,6 +356,7 @@ const CONTENT_DELIVERY_KEY: u8 = 0x04;
 const CONTENT_RECEIVED: u8 = 0x05;
 const CONTENT_LEAVING: u8 = 0x06;
 const CONTENT_FILE_DROP: u8 = 0x07;
+const CONTENT_GROUP_CALL: u8 = 0x08;
 
 impl Content {
     pub(crate) fn encode(&self) -> Result<Zeroizing<Vec<u8>>, GroupError> {
@@ -371,6 +377,9 @@ impl Content {
             Self::Received(message_id) => [&[CONTENT_RECEIVED][..], message_id].concat(),
             Self::Leaving => vec![CONTENT_LEAVING],
             Self::FileDrop(drop) => [&[CONTENT_FILE_DROP][..], &drop.encode()].concat(),
+            Self::GroupCall { invite, video } => {
+                [&[CONTENT_GROUP_CALL][..], &invite.encode(), &[u8::from(*video)]].concat()
+            }
         }))
     }
 
@@ -395,6 +404,14 @@ impl Content {
             Some((&CONTENT_FILE_DROP, drop)) => Ok(Self::FileDrop(
                 crate::drop::Drop::decode(drop).map_err(|_| GroupError::Malformed)?,
             )),
+            Some((&CONTENT_GROUP_CALL, [invite @ .., media])) => Ok(Self::GroupCall {
+                invite: crate::relay::Invite::decode(invite).map_err(|_| GroupError::Malformed)?,
+                video: match media {
+                    0 => false,
+                    1 => true,
+                    _ => return Err(GroupError::Malformed),
+                },
+            }),
             _ => Err(GroupError::Malformed),
         }
     }
@@ -556,6 +573,64 @@ fn roster_key(epoch_key: &SecretBytes<32>, group_id: &GroupId, epoch: u64) -> Re
 fn message_key(epoch_key: &SecretBytes<32>, group_id: &GroupId, epoch: u64) -> Result<SecretBytes<32>, GroupError> {
     let info = [labels::GROUP_MESSAGE, group_id, &epoch.to_be_bytes()].concat();
     Ok(kdf::derive(&[], epoch_key.expose(), &info)?)
+}
+
+/// The key of group call `stream`'s room in `epoch` (§17.2).
+pub fn call_key(
+    epoch_key: &SecretBytes<32>,
+    group_id: &GroupId,
+    epoch: u64,
+    stream: &[u8; 16],
+) -> Result<SecretBytes<32>, GroupError> {
+    let info = [labels::GROUP_CALL_KEY, group_id, &epoch.to_be_bytes(), stream].concat();
+    Ok(kdf::derive(&[], epoch_key.expose(), &info)?)
+}
+
+/// Who sealed a frame of a group call's room, and its number from that sender (§17.2).
+pub const CALL_ORIGIN_LEN: usize = 8;
+const CALL_FRAME_HEADER: usize = CALL_ORIGIN_LEN + 4;
+/// Frames are padded to a multiple of this, as link records are (§6.6).
+const CALL_FRAME_PAD: usize = 64;
+
+/// A record (§8.5, §9.6, §9.9) sealed for the room of a group call: `origin` is the sender's for
+/// this time in the room, `counter` counts its frames up from 0. A counter never restarts under an
+/// origin: the same nonce under the same key undoes the AEAD, so a new join takes a new origin.
+pub fn seal_call_frame(
+    key: &SecretBytes<32>,
+    origin: &[u8; CALL_ORIGIN_LEN],
+    counter: u32,
+    record: &[u8],
+) -> Result<Vec<u8>, GroupError> {
+    let len = u16::try_from(record.len()).map_err(|_| GroupError::Malformed)?;
+    let mut padded = Zeroizing::new(Vec::with_capacity(record.len() + 2 + CALL_FRAME_PAD));
+    padded.extend_from_slice(&len.to_be_bytes());
+    padded.extend_from_slice(record);
+    let padded_len = padded.len().div_ceil(CALL_FRAME_PAD) * CALL_FRAME_PAD;
+    padded.resize(padded_len, 0);
+    let header = [&origin[..], &counter.to_be_bytes()].concat();
+    let nonce: [u8; 12] = header[..].try_into().expect("8 + 4");
+    let sealed = ChaCha20Poly1305::seal(key, &nonce, &[], &padded)?;
+    Ok([&header[..], &sealed].concat())
+}
+
+/// A frame of a group call's room opened: its origin, its counter, and the record.
+pub type CallFrame = ([u8; CALL_ORIGIN_LEN], u32, Zeroizing<Vec<u8>>);
+
+/// Opens a frame of a group call's room: its origin and counter, and the record.
+pub fn open_call_frame(key: &SecretBytes<32>, frame: &[u8]) -> Result<CallFrame, GroupError> {
+    let (header, sealed) = frame.split_at_checked(CALL_FRAME_HEADER).ok_or(GroupError::Malformed)?;
+    let nonce: [u8; 12] = header.try_into().expect("checked");
+    let padded = ChaCha20Poly1305::open(key, &nonce, &[], sealed).map_err(|_| GroupError::NotAuthentic)?;
+    let (len, rest) = padded.split_first_chunk::<2>().ok_or(GroupError::Malformed)?;
+    let len = usize::from(u16::from_be_bytes(*len));
+    if len > rest.len() || rest[len..].iter().any(|&b| b != 0) {
+        return Err(GroupError::Malformed);
+    }
+    Ok((
+        nonce[..CALL_ORIGIN_LEN].try_into().expect("8"),
+        u32::from_be_bytes(nonce[CALL_ORIGIN_LEN..].try_into().expect("4")),
+        Zeroizing::new(rest[..len].to_vec()),
+    ))
 }
 
 fn check_name(name: &str) -> Result<(), GroupError> {
@@ -772,6 +847,64 @@ pub(crate) mod tests {
         let sealed = seal_message(&[3; 16], 4, &key, &[11; 16], &ayse.identity, 6_000, &invite).unwrap();
         assert_eq!(Message::read(&sealed).unwrap().open(&key).unwrap(), (6_000, invite));
         assert!(Content::decode(&[0x07; 30]).is_err());
+    }
+
+    #[test]
+    fn group_call_frames_open_only_under_their_key() {
+        let epoch_key = SecretBytes::from_slice(&[0x5a; 32]).unwrap();
+        let key = call_key(&epoch_key, &[1; 16], 3, &[2; 16]).unwrap();
+        assert_ne!(
+            key.expose(),
+            call_key(&epoch_key, &[1; 16], 3, &[9; 16]).unwrap().expose(),
+            "a key per call"
+        );
+        let record = vec![0x3f; 100];
+        let frame = seal_call_frame(&key, &[7; 8], 41, &record).unwrap();
+        assert_eq!((frame.len() - 12 - 16) % 64, 0, "padded");
+        let (origin, counter, opened) = open_call_frame(&key, &frame).unwrap();
+        assert_eq!((origin, counter, &opened[..]), ([7; 8], 41, &record[..]));
+        let other = call_key(&epoch_key, &[1; 16], 4, &[2; 16]).unwrap();
+        assert!(open_call_frame(&other, &frame).is_err(), "another epoch");
+        let mut tampered = frame.clone();
+        tampered[0] ^= 1;
+        assert!(open_call_frame(&key, &tampered).is_err(), "the header is the nonce");
+        assert!(open_call_frame(&key, &frame[..11]).is_err());
+
+        // The invite to a group call, in a group message (§17.2).
+        let invite = crate::relay::Invite::new(4, crate::relay::Purpose::Call, [2; 16]).unwrap();
+        for video in [false, true] {
+            let content = Content::GroupCall {
+                invite: invite.clone(),
+                video,
+            };
+            assert_eq!(Content::decode(&content.encode().unwrap()).unwrap(), content);
+        }
+        let mut bad = Content::GroupCall { invite, video: true }.encode().unwrap().to_vec();
+        *bad.last_mut().unwrap() = 2;
+        assert!(Content::decode(&bad).is_err());
+    }
+
+    /// `tests/vectors/group_call.json`; `check_group_call.py` re-derives it from §17.2.
+    #[test]
+    fn group_call_vector() {
+        use crate::crypto::test_util::{check_vector, to_hex};
+        let epoch_key = SecretBytes::from_slice(&[0x51; 32]).unwrap();
+        let (group_id, epoch, stream) = ([0x67; 16], 5u64, [0x5c; 16]);
+        let key = call_key(&epoch_key, &group_id, epoch, &stream).unwrap();
+        let record = crate::chat::ChatMessage::GroupCall { id: stream, group_id }
+            .encode()
+            .unwrap();
+        let frame = seal_call_frame(&key, &[0x0a; 8], 7, &record).unwrap();
+        let fields = [
+            ("epoch_key", to_hex(epoch_key.expose())),
+            ("group_id", to_hex(&group_id)),
+            ("epoch", epoch.to_string()),
+            ("stream", to_hex(&stream)),
+            ("call_key", to_hex(key.expose())),
+            ("record", to_hex(&record)),
+            ("frame", to_hex(&frame)),
+        ];
+        check_vector("group_call", &fields);
     }
 
     #[test]
