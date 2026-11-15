@@ -2278,6 +2278,10 @@ server → device:  0xa1 ready:  (empty)          everyone joined; from now on f
   time, unchanged and in order; what a member sent before it left still goes. A room of two closes
   when a member leaves; a room of more than two, when it empties or when fewer than two remain
   after a member left.
+- The server pings a member of a ready room every 5 s; a member it hears nothing from (no message,
+  ping or pong) for 15 s has left. A frame that cannot go out to a member within 5 s is not sent to
+  it. A room that closed is gone: the same join opens it anew, which is how a call comes back after
+  its connection dropped (§17.1, §17.2).
 - A room lives at most 6 hours. The server keeps rooms in memory only and rate-limits joins per
   source address.
 
@@ -2428,8 +2432,10 @@ vectors are §15's.
   a missed call from the contact. The device does not call back by itself.
 - **Video.** The relay is a fast transport for §8.6: video is sent over it from the start, without
   the move to a hotspot. An app may hold its camera back (*paused*) on a metered network.
-- **Losing the link.** When the relay connection drops, the call waits 20 s as in §8.5 and then
-  ends (*lost*); a call is not taken to another room.
+- **Losing the link.** When the relay connection drops mid-call, both devices join the same room
+  again with its token (`wait` 1), for up to 60 s; once it is ready, the link of §15.3 is set up
+  anew, the caller opening it, and the call goes on over it. Audio and video meanwhile are not sent
+  later. A call not back within 60 s ends (*lost*); a call is not taken to another room.
 - Whoever controls the server sees two connections in one room for as long as the call lasts,
   their addresses, timing and volume (which follow speech and the picture, padded to 64 bytes per
   record, §8.5); never who calls whom, nor what is said.
@@ -2468,6 +2474,10 @@ participants need not be each other's contacts.
   answer with theirs (§9.6). Nothing is passed on: everyone in the room gets every frame.
 - **Leaving** sends *group call leave*, then leaves the room. The call is over for a device once
   everyone else left; a call nobody joins within 45 s is given up (*no answer*).
+- **Losing the room.** A participant whose connection drops joins the room again for up to 60 s,
+  with a new origin, and sends *group call*; those in the room answer with their presence. Audio and
+  video meanwhile are not sent later. Not back within 60 s, its call ends (*lost*); the others
+  soon miss its presence (§9.6).
 - Members added after the call started hold no key of its epoch and are not in it; they can be
   called again. As in §9.6, participants trust each other with their voice: a frame is sealed for
   the group, not signed by its sender.
