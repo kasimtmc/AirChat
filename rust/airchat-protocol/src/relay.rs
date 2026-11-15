@@ -45,6 +45,8 @@ pub enum Purpose {
     File = 1,
     /// A call; the reference is its stream id.
     Call = 2,
+    /// Push-to-talk; the reference is the talk's stream id.
+    Talk = 3,
 }
 
 /// An invitation to a room, sent in mail (§15.1).
@@ -97,6 +99,7 @@ impl Invite {
         let purpose = match rest[1] {
             1 => Purpose::File,
             2 => Purpose::Call,
+            3 => Purpose::Talk,
             _ => return Err(RelayError::Malformed),
         };
         if !(MIN_SIZE..=MAX_SIZE).contains(&size) {
@@ -226,6 +229,10 @@ mod tests {
         for answer in [JoinAnswer::Ready, JoinAnswer::Refused] {
             assert_eq!(JoinAnswer::decode(&answer.encode()).unwrap(), answer);
         }
+        for purpose in [Purpose::Call, Purpose::Talk] {
+            let invite = Invite::new(2, purpose, [8; 16]).unwrap();
+            assert_eq!(Invite::decode(&invite.encode()).unwrap(), invite);
+        }
     }
 
     #[test]
@@ -260,7 +267,7 @@ mod tests {
         let invite = Invite::new(2, Purpose::Call, [0; 16]).unwrap();
         assert!(invite.join(0).is_err() && invite.join(181).is_err());
         let mut bytes = invite.encode();
-        bytes[ROOM_LEN + TOKEN_LEN + 1] = 3;
+        bytes[ROOM_LEN + TOKEN_LEN + 1] = 4;
         assert!(Invite::decode(&bytes).is_err(), "no such purpose");
         let mut join = invite.join(1).unwrap().encode();
         join.push(0);

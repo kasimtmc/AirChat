@@ -1,7 +1,7 @@
 [package]
 name = "airchat-protocol"
 description = "The AirChat protocol: end-to-end encrypted messaging, calls and groups between nearby devices without the internet. Specification, test vectors and reference implementation."
-version = "0.7.1"
+version = "0.8.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/kasimtmc/airchat-protocol"

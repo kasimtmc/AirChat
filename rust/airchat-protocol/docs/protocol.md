@@ -2249,14 +2249,15 @@ the same room and keeps nothing: no file, no stream, no log.
 0x62 relay invite:  room (16) || token (32) || size (u8, 2–33) || purpose (u8) || reference (16)
                     purpose 0x01 a file      no longer sent: files wait at the server (§18)
                             0x02 a call      reference: the call's stream id (§8.5)
+                            0x03 a talk      reference: the talk's stream id (§8.5, §17.3)
 ```
 
 - The inviter makes `room` and `token` at random and mails the invite (§14.3) to each invitee,
   sealed like any other record. The room is at the inviter's server.
 - `size` is how many join the room, the inviter among them: 2 for a call between two.
 - An invite is answered by joining, or not at all: the inviter learns nothing of an invitee that
-  stays away. A device joins only from a contact, and only for a call it would ring for (§17); it
-  ignores an invite of purpose `0x01`.
+  stays away. A device joins only from a contact, and only for a call it would ring for or a talk
+  (§17); it ignores an invite of purpose `0x01`.
 
 ### 15.2 Rooms
 
@@ -2478,6 +2479,28 @@ participants need not be each other's contacts.
   with a new origin, and sends *group call*; those in the room answer with their presence. Audio and
   video meanwhile are not sent later. Not back within 60 s, its call ends (*lost*); the others
   soon miss its presence (§9.6).
+
+### 17.3 Push-to-talk
+
+A talk (§8.5) to a contact goes over a room of its own, like a call between two; one the contact
+does not hear live becomes a voice message (§8.4).
+
+- **Talking.** The talker picks the talk's stream id, mails an invite (purpose `0x03`, `size` 2,
+  `reference` the stream id) and opens the room with `wait` 1. Over the link it sends *talk start*,
+  the audio, then *talk end*, and leaves the room. What it said before the link was up goes first,
+  in order, up to 5 s of it.
+- **Hearing.** A device that gets the invite joins at once unless it is in a call. It plays the talk
+  only if its user takes push-to-talk from the contact now; else it answers *talk end* with *not
+  allowed*. What "now" means is the app's: AirChat+ plays a talk only while the conversation with
+  the talker is open on screen and its user has not turned push-to-talk off for the time (for a
+  while, or outside chosen hours).
+- **A voice message instead.** The talker records what it says from the start. If the talk is not
+  heard live (turned down, *busy*, the link lost, or never up while the button was held), the
+  recording goes, once the button is let go, as a voice message: an Ogg Opus file (RFC 7845) of
+  type `audio/ogg` sent as a file (§18). A talk turned down mid-way goes whole. A voice message holds
+  at most 5 minutes.
+- A talk rings nothing and is not a call: it leaves no missed call and no trace in a call log.
+  Its room is not joined again when the connection drops.
 - Members added after the call started hold no key of its epoch and are not in it; they can be
   called again. As in §9.6, participants trust each other with their voice: a frame is sealed for
   the group, not signed by its sender.
