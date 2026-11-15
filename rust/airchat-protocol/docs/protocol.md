@@ -2497,8 +2497,11 @@ does not hear live becomes a voice message (§8.4).
 - **A voice message instead.** The talker records what it says from the start. If the talk is not
   heard live (turned down, *busy*, the link lost, or never up while the button was held), the
   recording goes, once the button is let go, as a voice message: an Ogg Opus file (RFC 7845) of
-  type `audio/ogg` sent as a file (§18). A talk turned down mid-way goes whole. A voice message holds
-  at most 5 minutes.
+  type exactly `audio/ogg;talk=1` (lowercase, no space, compared as a whole string) sent as a file
+  (§18). A talk turned down mid-way goes whole. A voice message holds at most 5 minutes. The hearer
+  deletes its content 15 minutes after its user first played it, keeping the message as expired;
+  the talker keeps its own copy. Other files, `audio/ogg` ones among them, are kept: over a relay,
+  §8.4's rule for voice messages holds for talks' alone.
 - A talk rings nothing and is not a call: it leaves no missed call and no trace in a call log.
   Its room is not joined again when the connection drops.
 - Members added after the call started hold no key of its epoch and are not in it; they can be
